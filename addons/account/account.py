@@ -580,6 +580,8 @@ class account_account(osv.osv):
         ('code_company_uniq', 'unique (code,company_id)', 'The code of the account must be unique per company !')
     ]
     def name_search(self, cr, user, name, args=None, operator='ilike', context=None, limit=100):
+        if context is None:
+            context = {}
         if not args:
             args = []
         args = args[:]
@@ -604,18 +606,18 @@ class account_account(osv.osv):
                     'like': ('=like', plus_percent),
                 }.get(operator, (operator, lambda n: n))
 
-                ids = self.search(cr, user, ['|', ('code', code_op, code_conv(name)), '|', ('shortcut', '=', name), ('name', operator, name)]+args, limit=limit)
+                ids = self.search(cr, user, ['|', ('code', code_op, code_conv(name)), '|', ('shortcut', '=', name), ('name', operator, name)]+args, limit=limit, context=context)
 
                 if not ids and len(name.split()) >= 2:
                     #Separating code and name of account for searching
                     operand1,operand2 = name.split(' ',1) #name can contain spaces e.g. OpenERP S.A.
-                    ids = self.search(cr, user, [('code', operator, operand1), ('name', operator, operand2)]+ args, limit=limit)
+                    ids = self.search(cr, user, [('code', operator, operand1), ('name', operator, operand2)]+ args, limit=limit, context=context)
             else:
-                ids = self.search(cr, user, ['&','!', ('code', '=like', name+"%"), ('name', operator, name)]+args, limit=limit)
+                ids = self.search(cr, user, ['&','!', ('code', '=like', name+"%"), ('name', operator, name)]+args, limit=limit, context=context)
                 # as negation want to restric, do if already have results
                 if ids and len(name.split()) >= 2:
                     operand1,operand2 = name.split(' ',1) #name can contain spaces e.g. OpenERP S.A.
-                    ids = self.search(cr, user, [('code', operator, operand1), ('name', operator, operand2), ('id', 'in', ids)]+ args, limit=limit)
+                    ids = self.search(cr, user, [('code', operator, operand1), ('name', operator, operand2), ('id', 'in', ids)]+ args, limit=limit, context=context)
         else:
             ids = self.search(cr, user, args, context=context, limit=limit)
         return self.name_get(cr, user, ids, context=context)
@@ -1312,7 +1314,6 @@ class account_move(osv.osv):
             context = {}
         invoice = context.get('invoice', False)
         valid_moves = self.validate(cr, uid, ids, context)
-#	valid_moves = True
 
         if not valid_moves:
             raise osv.except_osv(_('Error!'), _('You cannot validate a non-balanced entry.\nMake sure you have configured payment terms properly.\nThe latest payment term line should be of the "Balance" type.'))
@@ -1339,7 +1340,7 @@ class account_move(osv.osv):
                    'SET state=%s '\
                    'WHERE id IN %s',
                    ('posted', tuple(valid_moves),))
-        self.invalidate_cache(cr, uid, context=context)
+        self.invalidate_cache(cr, uid, ['state', ], valid_moves, context=context)
         return True
 
     def button_validate(self, cursor, user, ids, context=None):
@@ -1535,7 +1536,6 @@ class account_move(osv.osv):
     # Validate a balanced move. If it is a centralised journal, create a move.
     #
     def validate(self, cr, uid, ids, context=None):
-#	return True
         if context and ('__last_update' in context):
             del context['__last_update']
 
@@ -1574,7 +1574,7 @@ class account_move(osv.osv):
             if round(abs(amount), prec) < 10 ** (-max(5, prec)):
                 # If the move is balanced
                 # Add to the list of valid moves
-                # (analytic lines will be created later for valid moves)                  
+                # (analytic lines will be created later for valid moves)
                 valid_moves.append(move)
 
                 # Check whether the move lines are confirmed
@@ -1585,7 +1585,7 @@ class account_move(osv.osv):
 
                 obj_move_line.write(cr, uid, line_draft_ids, {
                     'state': 'valid'
-                }, context, check=False)
+                }, context=context, check=False)
 
                 account = {}
                 account2 = {}
@@ -1604,7 +1604,7 @@ class account_move(osv.osv):
                             obj_move_line.write(cr, uid, [line.id], {
                                 'tax_code_id': code,
                                 'tax_amount': amount
-                                }, context, check=False)
+                            }, context=context, check=False)
                     _logger.info("Validate account line.tax_code_id %s: line.tax_amount %s: code %s: amount %s: centralisation %s:" % (line.tax_code_id, line.tax_amount, code, amount, journal.centralisation))
             elif journal.centralisation:
                 # If the move is not balanced, it must be centralised...
@@ -1620,7 +1620,7 @@ class account_move(osv.osv):
                 self._centralise(cr, uid, move, 'credit', context=context)
                 obj_move_line.write(cr, uid, line_draft_ids, {
                     'state': 'valid'
-                }, context, check=False)
+                }, context=context, check=False)
             else:
                 # We can't validate it (it's unbalanced)
                 # Setting the lines as draft
@@ -1628,7 +1628,7 @@ class account_move(osv.osv):
                 if not_draft_line_ids:
                     obj_move_line.write(cr, uid, not_draft_line_ids, {
                         'state': 'draft'
-                    }, context, check=False)
+                    }, context=context, check=False)
         # Create analytic lines for the valid moves
         for record in valid_moves:
             obj_move_line.create_analytic_lines(cr, uid, [line.id for line in record.line_id], context)
@@ -2191,8 +2191,8 @@ class account_tax(osv.osv):
 
     @api.v8
     def compute_all(self, price_unit, quantity, product=None, partner=None, force_excluded=False):
-        return self._model.compute_all(
-            self._cr, self._uid, self, price_unit, quantity,
+        return account_tax.compute_all(
+            self._model, self._cr, self._uid, self, price_unit, quantity,
             product=product, partner=partner, force_excluded=force_excluded)
 
     def compute(self, cr, uid, taxes, price_unit, quantity,  product=None, partner=None):
@@ -2258,7 +2258,6 @@ class account_tax(osv.osv):
                 localdict = {'price_unit':cur_price_unit, 'product':product, 'partner':partner}
                 eval(tax.python_compute_inv, localdict, mode="exec", nocopy=True)
                 amount = localdict['result']
-                
             elif (tax.type=='balance' and tax.account_separate == False):
                 amount = cur_price_unit - reduce(lambda x,y: y.get('amount',0.0)+x, res, 0.0)
 
@@ -2309,7 +2308,6 @@ class account_tax(osv.osv):
         for r in res:
             r['price_unit'] -= total
             r['todo'] = 0
-#        product._product_tax_price(cur_price_unit+total)
         return res
 
     def compute_inv(self, cr, uid, taxes, price_unit, quantity, product=None, partner=None, precision=None):
