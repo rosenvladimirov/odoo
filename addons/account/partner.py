@@ -40,11 +40,13 @@ class account_fiscal_position(osv.osv):
         'auto_apply': fields.boolean('Automatic', help="Apply automatically this fiscal position if the conditions match."),
         'vat_required': fields.boolean('VAT required', help="Apply only if partner has a VAT number."),
         'country_id': fields.many2one('res.country', 'Country', help="Apply when the shipping or invoicing country matches. Takes precedence over positions matching on a country group."),
+        'country_group_id_inverse': fields.boolean('Inverse conditions', help="Inverse conditions for next question."),
         'country_group_id': fields.many2one('res.country.group', 'Country Group', help="Apply when the shipping or invoicing country is in this country group, and no position matches the country directly."),
     }
 
     _defaults = {
         'active': True,
+        'country_group_id_inverse': False,
     }
 
     def _check_country(self, cr, uid, ids, context=None):
@@ -67,7 +69,7 @@ class account_fiscal_position(osv.osv):
         for t in taxes:
             ok = False
             for tax in fposition_id.tax_ids:
-                if tax.tax_src_id.id == t.id:
+                if (tax.tax_src_id.id == t.id):
                     if tax.tax_dest_id:
                         result.add(tax.tax_dest_id.id)
                     ok=True
@@ -81,7 +83,7 @@ class account_fiscal_position(osv.osv):
         for tax in taxes:
             tax_count = 0
             for t in self.tax_ids:
-                if t.tax_src_id == tax:
+                if (t.tax_src_id == tax):
                     tax_count += 1
                     if t.tax_dest_id:
                         result |= t.tax_dest_id
@@ -134,11 +136,11 @@ class account_fiscal_position(osv.osv):
                 if fiscal_position_ids:
                     return fiscal_position_ids[0]
 
-                fiscal_position_ids = self.search(cr, uid, domain + [('country_group_id.country_ids', '=', delivery.country_id.id)], context=context, limit=1)
+                fiscal_position_ids = self.search(cr, uid, domain + [('country_group_id_inverse','=', False), ('country_group_id.country_ids', '=', delivery.country_id.id)], context=context, limit=1)
                 if fiscal_position_ids:
                     return fiscal_position_ids[0]
 
-            fiscal_position_ids = self.search(cr, uid, domain + [('country_id', '=', None), ('country_group_id', '=', None)], context=context, limit=1)
+            fiscal_position_ids = self.search(cr, uid, domain + [('country_id', '=', None), ('country_group_id', compare_domain, None)], context=context, limit=1)
             if fiscal_position_ids:
                 return fiscal_position_ids[0]
         return False
@@ -150,7 +152,9 @@ class account_fiscal_position_tax(osv.osv):
     _columns = {
         'position_id': fields.many2one('account.fiscal.position', 'Fiscal Position', required=True, ondelete='cascade'),
         'tax_src_id': fields.many2one('account.tax', 'Tax Source', required=True),
-        'tax_dest_id': fields.many2one('account.tax', 'Replacement Tax')
+        'tax_dest_id': fields.many2one('account.tax', 'Replacement Tax'),
+        'type_tax_conditional': fields.selection( [('intraeub2b','Check supplier in VIES system'), ('intraeub2c','UnChecked supplier in VIES system'), ('inport','Deal with tri-party countries'), ('none','Standard deal')], 'Tax conditional', required=True,
+            help="The conditional of deal for Replacement Tax.", default='none')
     }
 
     _sql_constraints = [

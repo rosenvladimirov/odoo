@@ -14,6 +14,7 @@
                             <div><field name="categ_id" colspan="3" nolabel="1"/></div>
                         </group>
                         <group name="properties">
+                            <field name="diff_price_vat"/>
                             <group>
                                 <field name="property_account_income" domain="[('type','=','other')]" groups="account.group_account_user"/>
                                 <field name="taxes_id" colspan="2" widget="many2many_tags"/>

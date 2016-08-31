@@ -59,6 +59,8 @@ class product_template(osv.osv):
             relation='account.account',
             string="Expense Account",
             help="This account will be used for invoices instead of the default one to value expenses for the current product."),
+        'diff_price_vat': fields.boolean('is have VAT price', 
+            help="If unchecked, it will allow to work with two price one for sale/purchase and one for VAT calculations."),
     }
 
 

@@ -67,7 +67,6 @@ class account_invoice(models.Model):
     @api.depends('invoice_line.price_subtotal', 'tax_line.amount')
     def _compute_amount(self):
         self.amount_untaxed = sum(line.price_subtotal for line in self.invoice_line)
-#        self.amount_tax = sum(line.amount*line.tax_parent_sign for line in self.tax_line)
         self.amount_tax_credit = 0.0
         self.amount_tax_payable = 0.0
         tax_advpayable = 0.0
@@ -75,7 +74,6 @@ class account_invoice(models.Model):
             self.amount_tax_credit += line.amount*line.tax_parent_sign if line.tax_credit_payable == 'taxcredit' else 0
             self.amount_tax_payable += line.amount*line.tax_parent_sign if line.tax_credit_payable == 'taxpay' else 0
             tax_advpayable += line.amount*line.tax_parent_sign if line.tax_credit_payable == 'taxadvpay' else 0
-#            _logger.info("Get amount_tax_payable: %i and mode: %s" % (self.amount_tax_payable, line.tax_credit_payable))
         self.amount_tax = self.amount_tax_payable + self.amount_tax_credit
         self.amount_tax_payable += tax_advpayable
         self.amount_total = self.amount_untaxed + self.amount_tax
@@ -138,7 +136,6 @@ class account_invoice(models.Model):
         # Each partial reconciliation is considered only once for each invoice it appears into,
         # and its residual amount is divided by this number of invoices
         partial_reconciliations_done = []
-        _logger.info("_compute_residual %s:" % self.sudo().move_id.line_id)
         for line in self.sudo().move_id.line_id:
             _logger.info("account_id.type: %s line.reconcile_partial_id: %s self.residual: %s" % (line.account_id.type, line.reconcile_partial_id.id, self.residual))
             if line.account_separate:
@@ -148,14 +145,12 @@ class account_invoice(models.Model):
                 continue
             if line.reconcile_partial_id and line.reconcile_partial_id.id in partial_reconciliations_done:
                 continue
-            _logger.info("after account_id.type: %s line.reconcile_partial_id: %s partial_reconciliations_done: %s" % (line.account_id.type, line.reconcile_partial_id.id, partial_reconciliations_done))
             # Get the correct line residual amount
             if line.currency_id == self.currency_id:
                 line_amount = line.amount_residual_currency if line.currency_id else line.amount_residual
             else:
                 from_currency = line.company_id.currency_id.with_context(date=line.date)
                 line_amount = from_currency.compute(line.amount_residual, self.currency_id)
-            _logger.info("line_amount: %s" % (line_amount))
             # For partially reconciled lines, split the residual amount
             if line.reconcile_partial_id:
                 partial_reconciliation_invoices = set()
@@ -165,7 +160,6 @@ class account_invoice(models.Model):
                 line_amount = self.currency_id.round(line_amount / len(partial_reconciliation_invoices))
                 partial_reconciliations_done.append(line.reconcile_partial_id.id)
             self.residual += line_amount
-        _logger.info("self.residual: %s line_amount: %s" % (self.residual, residual_s))
         self.residual = max(self.residual, 0.0)
 
     @api.one
