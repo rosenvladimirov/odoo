@@ -1888,7 +1888,7 @@ class account_tax(osv.osv):
         'sequence': fields.integer('Sequence', required=True, help="The sequence field is used to order the tax lines from the lowest sequences to the higher ones. The order is important if you have a tax with several tax children. In this case, the evaluation order is important."),
         'amount': fields.float('Amount', required=True, digits_compute=get_precision_tax(), help="For taxes of type percentage, enter % ratio between 0-1."),
         'active': fields.boolean('Active', help="If the active field is set to False, it will allow you to hide the tax without removing it."),
-        'type': fields.selection( [('percent','Percentage'), ('fixed','Fixed Amount'), ('none','None'), ('code','Python Code'), ('balance','Balance'), ('customs','Customs rate'), ('separate', 'Separate movement')], 'Tax Type', required=True,
+        'type': fields.selection( [('percent','Percentage'), ('fixed','Fixed Amount'), ('none','None'), ('code','Python Code'), ('balance','Balance'), ('customspercent','Customs rate'), ('customsfix','Customs fixed amount'), ('separate', 'Separate movement')], 'Tax Type', required=True,
             help="The computation method for the tax amount."),
         'applicable_type': fields.selection( [('true','Always'), ('code','Given by Python Code')], 'Applicability', required=True,
             help="If not applicable (computed through a Python code), the tax won't appear on the invoice."),
@@ -2089,6 +2089,11 @@ class account_tax(osv.osv):
             elif tax.type=='separate':
                 data['amount'] = 0.0
                 data['account_separate'] = True
+            elif tax.type == 'customspercent':
+                data['name'] = data['name']+''
+            elif tax.type == 'customsfix':
+                data['name'] = data['name']+''
+
 #           Force update child configurations
             if parents:
                 data['account_separate'] = parents['account_separate']         
@@ -2138,7 +2143,7 @@ class account_tax(osv.osv):
         return self.compute_all(cr, uid, [tax], amount, 1) # TOCHECK may use force_exclude parameter
 
     @api.v7
-    def compute_all(self, cr, uid, taxes, price_unit, quantity, product=None, partner=None, force_excluded=False):
+    def compute_all(self, cr, uid, taxes, price_unit, quantity, product=None, partner=None, force_excluded=False, price_unit_vat=False):
         """
         :param force_excluded: boolean used to say that we don't want to consider the value of field price_include of
             tax. It's used in encoding by line where you don't matter if you encoded a tax with that boolean to True or
@@ -2163,7 +2168,9 @@ class account_tax(osv.osv):
         tax_compute_precision = precision
         if taxes and taxes[0].company_id.tax_calculation_rounding_method == 'round_globally':
             tax_compute_precision += 5
-        totalin = totalex = round(price_unit * quantity, precision)
+        _logger.info("compute_all %s" % (price_unit))
+        totalex = totalin = round(price_unit * quantity, precision)
+        price_unit_vat = price_unit_vat and round(price_unit_vat * quantity, precision) or round(price_unit * quantity, precision) 
         tin = []
         tex = []
         for tax in taxes:
@@ -2171,12 +2178,13 @@ class account_tax(osv.osv):
                 tex.append(tax)
             else:
                 tin.append(tax)
-        tin = self.compute_inv(cr, uid, tin, price_unit, quantity, product=product, partner=partner, precision=tax_compute_precision)
+        tin = self.compute_inv(cr, uid, tin, price_unit_vat, quantity, product=product, partner=partner, precision=tax_compute_precision)
         for r in tin:
             totalex -= r.get('amount', 0.0)*r.get('tax_parent_sign', 0.0)
+            price_unit_vat -= r.get('amount', 0.0)*r.get('tax_parent_sign', 0.0)
         totlex_qty = 0.0
         try:
-            totlex_qty = totalex/quantity
+            totlex_qty = price_unit_vat/quantity
         except:
             pass
         tex = self._compute(cr, uid, tex, totlex_qty, quantity, product=product, partner=partner, precision=tax_compute_precision)
@@ -2215,10 +2223,10 @@ class account_tax(osv.osv):
             if (r.get('balance',False) and r.get('account_separate', False)==False):
                 r['amount'] = round(r.get('balance', 0.0) * quantity, precision) - total
             else:
-#    		_logger.info("_Compute before tax amount %s, parent:%s, quantity:%s" % (r.get('amount', 0.0), r.get('tax_parent_sign'), quantity))
+#           _logger.info("_Compute before tax amount %s, parent:%s, quantity:%s" % (r.get('amount', 0.0), r.get('tax_parent_sign'), quantity))
                 r['amount'] = round(r.get('amount', 0.0) * quantity, precision)
                 total += r['amount']
-#    		_logger.info("_Compute tax name:%s amount:%s, parent:%s, quantity:%s" % (r.get('name', 0.0), r.get('amount', 0.0), r.get('tax_parent_sign'), quantity))
+#       _logger.info("_Compute tax name:%s amount:%s, parent:%s, quantity:%s" % (r.get('name', 0.0), r.get('amount', 0.0), r.get('tax_parent_sign'), quantity))
         return res
 
     def _fix_tax_included_price(self, cr, uid, price, prod_taxes, line_taxes):

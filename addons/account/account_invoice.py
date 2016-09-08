@@ -1301,11 +1301,13 @@ class account_invoice_line(models.Model):
     _order = "invoice_id,sequence,id"
 
     @api.one
-    @api.depends('price_unit', 'discount', 'invoice_line_tax_id', 'quantity',
+    @api.depends('price_unit', 'price_unit_vat', 'diff_price_vat', 'discount', 'invoice_line_tax_id', 'quantity',
         'product_id', 'invoice_id.partner_id', 'invoice_id.currency_id')
     def _compute_price(self):
         price = self.price_unit * (1 - (self.discount or 0.0) / 100.0)
-        taxes = self.invoice_line_tax_id.compute_all(price, self.quantity, product=self.product_id, partner=self.invoice_id.partner_id)
+        price_vat = (self.diff_price_vat and self.price_unit_vat > price) and self.price_unit_vat or False
+        _loggir.info("_compute_price %s:" % self.diff_price_vat)
+        taxes = self.invoice_line_tax_id.compute_all(price, self.quantity, product=self.product_id, partner=self.invoice_id.partner_id, price_unit_vat=price_vat)
         self.price_subtotal = taxes['total']
         if self.invoice_id:
             self.price_subtotal = self.invoice_id.currency_id.round(self.price_subtotal)
@@ -1322,10 +1324,11 @@ class account_invoice_line(models.Model):
                 price = vals.get('price_unit', 0) * (1 - vals.get('discount', 0) / 100.0)
                 total = total - (price * vals.get('quantity'))
                 taxes = vals.get('invoice_line_tax_id')
+                price_vat = (vals.get('diff_price_vat', False) and vals.get('price_unit_vat', 0) > price) and vals.get('price_unit_vat', 0) or False
                 if taxes and len(taxes[0]) >= 3 and taxes[0][2]:
                     taxes = self.env['account.tax'].browse(taxes[0][2])
-                    tax_res = taxes.compute_all(price, vals.get('quantity'),
-                        product=vals.get('product_id'), partner=self._context.get('partner_id'))
+                    tax_res = taxes.compute_all(price_vat, vals.get('quantity'),
+                        product=vals.get('product_id'), partner=self._context.get('partner_id'), price_unit_vat=price_vat)
                     for tax in tax_res['taxes']:
                         amount_tax_credit += tax['amount']*tax['tax_parent_sign'] if tax['tax_credit_payable'] == 'taxcredit' else 0
                         amount_tax_payable += tax['amount']*tax['tax_parent_sign'] if tax['tax_credit_payable'] == 'taxpay' else 0
@@ -1361,6 +1364,8 @@ class account_invoice_line(models.Model):
     price_unit = fields.Float(string='Unit Price', required=True,
         digits= dp.get_precision('Product Price'),
         default=_default_price_unit)
+    price_unit_vat = fields.Float(string='Unit Price for VAT', required=True, digits_compute= dp.get_precision('Product Price'), readonly=True, states={'draft': [('readonly', False)]})
+    diff_price_vat = fields.Boolean(string='is have VAT price', help="If unchecked, it will allow to work with two price one for sale/purchase and one for VAT calculations.")
     price_subtotal = fields.Float(string='Amount', digits= dp.get_precision('Account'),
         store=True, readonly=True, compute='_compute_price')
     quantity = fields.Float(string='Quantity', digits= dp.get_precision('Product Unit of Measure'),
@@ -1506,12 +1511,12 @@ class account_invoice_line(models.Model):
         for line in inv.invoice_line:
             mres = self.move_line_get_item(line)
             mres['invl_id'] = line.id
-            _logger.info("Line id: %s account id: %s price: %s " % (mres['invl_id'], mres['account_id'], mres['price']))
             res.append(mres)
             tax_code_found = False
-            taxes = line.invoice_line_tax_id.compute_all(
-                (line.price_unit * (1.0 - (line.discount or 0.0) / 100.0)),
-                line.quantity, line.product_id, inv.partner_id)['taxes']
+            price = (line.price_unit * (1.0 - (line.discount or 0.0) / 100.0))
+            price_vat = line.price_unit_vat if (line.diff_price_vat and line.price_unit_vat > price) else False
+            _logger.info("Line id: %s account id: %s price: %s: %s: %s:" % (mres['invl_id'], mres['account_id'], mres['price'], line.diff_price_vat, line.price_unit_vat))
+            taxes = line.invoice_line_tax_id.compute_all(price, line.quantity, line.product_id, inv.partner_id, price_unit_vat=price_vat)['taxes']
             for tax in taxes:
                 if inv.type in ('out_invoice', 'in_invoice'):
                     tax_code_id = tax['base_code_id']
@@ -1644,9 +1649,9 @@ class account_invoice_tax(models.Model):
         currency = invoice.currency_id.with_context(date=invoice.date_invoice or fields.Date.context_today(invoice))
         company_currency = invoice.company_id.currency_id
         for line in invoice.invoice_line:
-            taxes = line.invoice_line_tax_id.compute_all(
-                (line.price_unit * (1 - (line.discount or 0.0) / 100.0)),
-                line.quantity, line.product_id, invoice.partner_id)['taxes']
+            price = (line.price_unit * (1 - (line.discount or 0.0) / 100.0))
+            price_vat =  (line.diff_price_vat and line.price_unit_vat > price) and line.price_unit_vat or False
+            taxes = line.invoice_line_tax_id.compute_all(price, line.quantity, line.product_id, invoice.partner_id, price_unit_vat=price_vat)['taxes']
             for tax in taxes:
                 val = {
                     'invoice_id': invoice.id,
@@ -1696,8 +1701,8 @@ class account_invoice_tax(models.Model):
             t['amount'] = currency.round(t['amount'])
             t['base_amount'] = currency.round(t['base_amount'])
             t['tax_amount'] = currency.round(t['tax_amount'])
-    	    _logger.info("tax_grouped detail amount:%s base:%s tax:%s sign:%s" % (t['amount'], t['base_amount'], t['tax_amount'], t['tax_parent_sign']))
-	    _logger.info("tax_grouped amount:%s base:%s tax:%s" % (tax_grouped[key]['amount'], tax_grouped[key]['base_amount'], tax_grouped[key]['tax_amount']))
+            _logger.info("tax_grouped detail amount:%s base:%s tax:%s sign:%s" % (t['amount'], t['base_amount'], t['tax_amount'], t['tax_parent_sign']))
+        _logger.info("tax_grouped amount:%s base:%s tax:%s" % (tax_grouped[key]['amount'], tax_grouped[key]['base_amount'], tax_grouped[key]['tax_amount']))
         return tax_grouped
 
     @api.v7

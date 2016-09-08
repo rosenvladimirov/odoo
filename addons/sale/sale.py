@@ -49,10 +49,11 @@ class sale_order(osv.osv):
         val = val_payable = 0.0
         line_obj = self.pool['sale.order.line']
         price = line_obj._calc_line_base_price(cr, uid, line, context=context)
+        price_vat = line_obj._calc_line_base_price_vat(cr, uid, line, context=context)
         qty = line_obj._calc_line_quantity(cr, uid, line, context=context)
         for c in self.pool['account.tax'].compute_all(
                 cr, uid, line.tax_id, price, qty, line.product_id,
-                line.order_id.partner_id)['taxes']:
+                line.order_id.partner_id, price_unit_vat=price_vat)['taxes']:
             val += c.get('amount', 0.0)*c.get('tax_parent_sign', 0.0) if c.get('tax_credit_payable') == 'taxcredit' else 0.0
             val_payable += c.get('amount', 0.0)*c.get('tax_parent_sign', 0.0) if c.get('tax_credit_payable') == 'taxpay' else 0.0
 #           val_tax_advpayable += c.get('amount', 0.0)*c.get('tax_parent_sign', 0.0) if c.get('tax_credit_payable') == 'taxadvpay' else 0.0
@@ -862,6 +863,10 @@ class sale_order_line(osv.osv):
     def _calc_line_base_price(self, cr, uid, line, context=None):
         return line.price_unit * (1 - (line.discount or 0.0) / 100.0)
 
+    def _calc_line_base_price_vat(self, cr, uid, line, context=None):
+        line_price = _calc_line_base_price(cr, uid, line, context=context)
+        return line.price_unit_vat if (line.diff_price_vat and line.price_unit_vat > line_price) else False
+
     def _calc_line_quantity(self, cr, uid, line, context=None):
         return line.product_uom_qty
 
@@ -873,10 +878,12 @@ class sale_order_line(osv.osv):
             context = {}
         for line in self.browse(cr, uid, ids, context=context):
             price = self._calc_line_base_price(cr, uid, line, context=context)
+            price_vat = self._calc_line_base_price_vat(cr, uid, line, context=context)
             qty = self._calc_line_quantity(cr, uid, line, context=context)
             taxes = tax_obj.compute_all(cr, uid, line.tax_id, price, qty,
                                         line.product_id,
-                                        line.order_id.partner_id)
+                                        line.order_id.partner_id,
+                                        price_unit_vat=price_vat)
             cur = line.order_id.pricelist_id.currency_id
             res[line.id] = cur_obj.round(cr, uid, cur, taxes['total'])
         return res
@@ -923,8 +930,8 @@ class sale_order_line(osv.osv):
                 'sale.order.line': (lambda self,cr,uid,ids,ctx=None: ids, ['invoice_lines'], 10)
             }),
         'price_unit': fields.float('Unit Price', required=True, digits_compute= dp.get_precision('Product Price'), readonly=True, states={'draft': [('readonly', False)]}),
-        'price_unit_vat': fields.float('Unit Price for VAT', required=False, digits_compute= dp.get_precision('Product Price'), readonly=True, states={'draft': [('readonly', False)]}),
-        'diff_price_vat': fields.related('product_id', 'diff_price_vat', string="is have VAT price", type='boolean', relation='product.product', readonly=True),
+        'price_unit_vat': fields.float('Unit Price for VAT', required=True, digits_compute= dp.get_precision('Product Price')),
+        'diff_price_vat': fields.boolean('is have VAT price', help="If unchecked, it will allow to work with two price one for sale/purchase and one for VAT calculations."),
         'price_subtotal': fields.function(_amount_line, string='Subtotal', digits_compute= dp.get_precision('Account')),
         'price_reduce': fields.function(_get_price_reduce, type='float', string='Price Reduce', digits_compute=dp.get_precision('Product Price')),
         'tax_id': fields.many2many('account.tax', 'sale_order_tax', 'order_line_id', 'tax_id', 'Taxes', readonly=True, states={'draft': [('readonly', False)]}),
@@ -1017,6 +1024,8 @@ class sale_order_line(osv.osv):
                 'origin': line.order_id.name,
                 'account_id': account_id,
                 'price_unit': pu,
+                'price_unit_vat': line.price_unit_vat or 0.0,
+                'diff_price_vat': line.diff_price_vat,
                 'quantity': uosqty,
                 'discount': line.discount,
                 'uos_id': uos_id,
@@ -1130,6 +1139,7 @@ class sale_order_line(osv.osv):
         warning_msgs = ''
         product_obj = product_obj.browse(cr, uid, product, context=context_partner)
 
+        result['diff_price_vat'] = product_obj.diff_price_vat
         uom2 = False
         if uom:
             uom2 = product_uom_obj.browse(cr, uid, uom)
