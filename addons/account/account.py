@@ -2114,7 +2114,7 @@ class account_tax(osv.osv):
                             balansed = True
                             break
                     if balansed:
-                        child_tax[inx]['amount'] = round(amount2, prec)
+                        child_tax[inx]['amount'] = amount2
                         child_tax[inx]['balance'] = child_tax[inx]['amount']
                         amount2 -= child_tax[inx]['amount']
                     _logger.info("separated %s -> %s: %s" % (amount2, inx, child_tax[inx]))
