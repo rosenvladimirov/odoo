@@ -2197,10 +2197,10 @@ class account_tax(osv.osv):
         }
 
     @api.v8
-    def compute_all(self, price_unit, quantity, product=None, partner=None, force_excluded=False):
+    def compute_all(self, price_unit, quantity, product=None, partner=None, force_excluded=False, price_unit_vat=False):
         return account_tax.compute_all(
             self._model, self._cr, self._uid, self, price_unit, quantity,
-            product=product, partner=partner, force_excluded=force_excluded)
+            product=product, partner=partner, force_excluded=force_excluded, price_unit_vat=price_unit_vat)
 
     def compute(self, cr, uid, taxes, price_unit, quantity,  product=None, partner=None):
         _logger.warning("Deprecated, use compute_all(...)['taxes'] instead of compute(...) to manage prices with tax included.")

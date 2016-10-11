@@ -211,7 +211,7 @@ class account_invoice(models.Model):
         readonly=True, states={'draft': [('readonly', False)]})
     supplier_invoice_number = fields.Char(string='Supplier Invoice Number',
         help="The reference of this invoice as provided by the supplier.",
-        readonly=True, states={'draft': [('readonly', False)]})
+        required=False, readonly=True, states={'draft': [('readonly', False),('required',True)]})
     type = fields.Selection([
             ('out_invoice','Customer Invoice'),
             ('in_invoice','Supplier Invoice'),
@@ -1306,7 +1306,7 @@ class account_invoice_line(models.Model):
     def _compute_price(self):
         price = self.price_unit * (1 - (self.discount or 0.0) / 100.0)
         price_vat = (self.diff_price_vat and self.price_unit_vat > price) and self.price_unit_vat or False
-        _loggir.info("_compute_price %s:" % self.diff_price_vat)
+        _logger.info("_compute_price %s:" % self.diff_price_vat)
         taxes = self.invoice_line_tax_id.compute_all(price, self.quantity, product=self.product_id, partner=self.invoice_id.partner_id, price_unit_vat=price_vat)
         self.price_subtotal = taxes['total']
         if self.invoice_id:
@@ -1702,7 +1702,7 @@ class account_invoice_tax(models.Model):
             t['base_amount'] = currency.round(t['base_amount'])
             t['tax_amount'] = currency.round(t['tax_amount'])
             _logger.info("tax_grouped detail amount:%s base:%s tax:%s sign:%s" % (t['amount'], t['base_amount'], t['tax_amount'], t['tax_parent_sign']))
-        _logger.info("tax_grouped amount:%s base:%s tax:%s" % (tax_grouped[key]['amount'], tax_grouped[key]['base_amount'], tax_grouped[key]['tax_amount']))
+        # _logger.info("tax_grouped amount:%s base:%s tax:%s" % (tax_grouped[key]['amount'], tax_grouped[key]['base_amount'], tax_grouped[key]['tax_amount']))
         return tax_grouped
 
     @api.v7
