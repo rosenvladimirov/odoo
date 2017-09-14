@@ -21,6 +21,7 @@
 
 import sale
 import sales_team
+import sale_order_virtual
 import res_partner
 import wizard
 import report

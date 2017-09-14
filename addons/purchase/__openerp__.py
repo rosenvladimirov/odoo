@@ -21,7 +21,7 @@
 
 
 {
-    'name': 'Purchase Management',
+    'name': 'Purchase Management fix',
     'version': '1.1',
     'category': 'Purchase Management',
     'sequence': 19,

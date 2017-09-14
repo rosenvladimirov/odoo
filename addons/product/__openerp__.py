@@ -21,7 +21,7 @@
 
 
 {
-    'name': 'Products & Pricelists',
+    'name': 'Products & Pricelists fix',
     'version': '1.1',
     'author': 'OpenERP SA',
     'category': 'Sales Management',
@@ -46,7 +46,7 @@ Pricelists support:
         * Cost price
         * List price
         * Supplier price
-
+        * Information and pitstops
 Pricelists preferences by product and/or partners.
 
 Print product labels with barcode.
@@ -55,7 +55,7 @@ Print product labels with barcode.
         'security/product_security.xml',
         'security/ir.model.access.csv',
         'wizard/product_price_view.xml',
-        'product_data.xml',
+        #'product_data.xml',
         'product_report.xml',
         'product_view.xml',
         'pricelist_view.xml',

@@ -384,6 +384,15 @@ class product_attribute_value(osv.osv):
                     'price_extra': value,
                 }, context=context)
 
+    def _get_price_extra_lst(self, cr, uid, ids, name, args, context=None):
+        result = dict.fromkeys(ids, False)
+        for product_att_av in self.browse(cr, SUPERUSER_ID, ids, context=context):
+            for price_id in product_att_av.price_ids:
+                if price_id.product_tmpl_id.id == context.get('active_id'):
+                    result[product_att_av.id] = price_id.product_tmpl_id.taxes_id.compute_all(price_id.price_extra, 1, inverce=False)['total_included']
+                    break
+        return result
+
     def name_get(self, cr, uid, ids, context=None):
         if context and not context.get('show_attribute', True):
             return super(product_attribute_value, self).name_get(cr, uid, ids, context=context)
@@ -401,6 +410,7 @@ class product_attribute_value(osv.osv):
             fnct_inv=_set_price_extra,
             digits_compute=dp.get_precision('Product Price'),
             help="Price Extra: Extra price for the variant with this attribute value on sale price. eg. 200 price extra, 1000 + 200 = 1200."),
+        'price_extra_lst': fields.function(_get_price_extra_lst, type='float', string='public Price Extra', digits_compute=dp.get_precision('Product Price'), store=False),
         'price_ids': fields.one2many('product.attribute.price', 'value_id', string='Attribute Prices', readonly=True),
     }
     _sql_constraints = [
@@ -490,6 +500,12 @@ class product_template(osv.osv):
             res.setdefault(id, 0.0)
         return res
 
+    def _product_template_price_lst(self, cr, uid, ids, name, arg, context=None):
+        res = dict.fromkeys(ids, 0.0)
+        for product in self.browse(cr, SUPERUSER_ID, ids, context=context):
+            res[product.id] = product.taxes_id.compute_all(product.price, 1, inverce=False)['total_included']
+        return res
+
     def get_history_price(self, cr, uid, product_tmpl, company_id, date=None, context=None):
         if context is None:
             context = {}
@@ -508,11 +524,37 @@ class product_template(osv.osv):
         price_history_obj = self.pool['product.price.history']
         user_company = self.pool.get('res.users').browse(cr, uid, uid, context=context).company_id.id
         company_id = context.get('force_company', user_company)
+        #_logger.info("Standart price %s" % value)
         price_history_obj.create(cr, uid, {
             'product_template_id': product_tmpl_id,
             'cost': value,
             'company_id': company_id,
         }, context=context)
+
+    def _product_lst_price(self, cr, uid, ids, name, arg, context=None):
+        product_uom_obj = self.pool.get('product.uom')
+        res = dict.fromkeys(ids, 0.0)
+
+        for product in self.browse(cr, SUPERUSER_ID, ids, context=context):
+            if 'uom' in context:
+                uom = product.uos_id or product.uom_id
+                res[product.id] = product_uom_obj._compute_price(cr, uid,
+                        uom.id, product.list_price, context['uom'])
+            else:
+                res[product.id] = product.list_price
+            res[product.id] = product.taxes_id.compute_all(res[product.id], 1, inverce=False)['total_included']
+        return res
+
+    def _set_product_lst_price(self, cr, uid, id, name, value, args, context=None):
+        product_uom_obj = self.pool.get('product.uom')
+
+        product = self.browse(cr, SUPERUSER_ID, id, context=context)
+        if 'uom' in context:
+            uom = product.uos_id or product.uom_id
+            value = product_uom_obj._compute_price(cr, uid,
+                    context['uom'], value, uom.id)
+        product.taxes_id.compute_all(value, 1, inverce=True)['total_included']
+        return product.write({'list_price': value})
 
     def _get_product_variant_count(self, cr, uid, ids, name, arg, context=None):
         res = {}
@@ -531,16 +573,20 @@ class product_template(osv.osv):
         'description_sale': fields.text('Sale Description',translate=True,
             help="A description of the Product that you want to communicate to your customers. "
                  "This description will be copied to every Sale Order, Delivery Order and Customer Invoice/Refund"),
-        'type': fields.selection([('consu', 'Consumable'),('service','Service')], 'Product Type', required=True, help="Consumable are product where you don't manage stock, a service is a non-material product provided by a company or an individual."),        
+        'type': fields.selection([('consu', 'Consumable'),('service','Service'),('money','Financial instruments')], 'Product Type', required=True, help="Consumable are product where you don't manage stock, a service is a non-material product provided by a company or an individual."),        
         'rental': fields.boolean('Can be Rent'),
         'categ_id': fields.many2one('product.category','Internal Category', required=True, change_default=True, domain="[('type','=','normal')]" ,help="Select category for the current product"),
         'price': fields.function(_product_template_price, type='float', string='Price', digits_compute=dp.get_precision('Product Price')),
+        'price_lst': fields.function(_product_template_price_lst, type='float', string='Price', digits_compute=dp.get_precision('Product Price'), store=False),
         'list_price': fields.float('Sale Price', digits_compute=dp.get_precision('Product Price'), help="Base price to compute the customer price. Sometimes called the catalog price."),
-        'lst_price' : fields.related('list_price', type="float", string='Public Price', digits_compute=dp.get_precision('Product Price')),
+#        'lst_price' : fields.related('list_price', type="float", string='Public Price', digits_compute=dp.get_precision('Product Price')),
+        'lst_price': fields.function(_product_lst_price, fnct_inv=_set_product_lst_price, type='float', string='Public Price', digits_compute=dp.get_precision('Product Price')),
         'standard_price': fields.property(type = 'float', digits_compute=dp.get_precision('Product Price'), 
                                           help="Cost price of the product template used for standard stock valuation in accounting and used as a base price on purchase orders. "
                                                "Expressed in the default unit of measure of the product.",
                                           groups="base.group_user", string="Cost Price"),
+#        'diff_price_vat': fields.boolean('is have VAT price', help="If unchecked, it will allow to work with two price one for sale/purchase and one for VAT calculations."),
+        'currency_id': fields.many2one('res.currency', 'Currency'),
         'volume': fields.float('Volume', help="The volume in m3."),
         'weight': fields.float('Gross Weight', digits_compute=dp.get_precision('Stock Weight'), help="The gross weight in Kg."),
         'weight_net': fields.float('Net Weight', digits_compute=dp.get_precision('Stock Weight'), help="The net weight in Kg."),
@@ -628,7 +674,7 @@ class product_template(osv.osv):
             else:
                 company_id = context.get('force_company') or product.env.user.company_id.id
                 product = product.with_context(force_company=company_id)
-                res[product.id] = res[product.id] = product.sudo()[ptype]
+                res[product.id] = product.sudo()[ptype]
             if ptype == 'list_price':
                 res[product.id] += product._name == "product.product" and product.price_extra or 0.0
             if 'uom' in context:
@@ -744,6 +790,12 @@ class product_template(osv.osv):
             self.create_variant_ids(cr, uid, [product_template_id], context=context)
         self._set_standard_price(cr, uid, product_template_id, vals.get('standard_price', 0.0), context=context)
 
+        if vals.get('currency_id'):
+            pt_obj = self.pool.get('product.price.type')
+            pt_id = pt_obj.search(cr, uid, [('field', '=', 'list_price')], limit=1, context=context)
+            pt = pt_obj.browse(cr, uid, pt_id, context=context)
+            vals['currency_id'] = pt.currency_id
+
         # TODO: this is needed to set given values to first variant after creation
         # these fields should be moved to product as lead to confusion
         related_vals = {}
@@ -793,7 +845,7 @@ class product_template(osv.osv):
         'company_id': lambda s,cr,uid,c: s.pool.get('res.company')._company_default_get(cr, uid, 'product.template', context=c),
         'list_price': 1,
         'standard_price': 0.0,
-        'sale_ok': 1,        
+        'sale_ok': 1,
         'uom_id': _get_uom_id,
         'uom_po_id': _get_uom_id,
         'uos_coeff': 1.0,
@@ -888,6 +940,12 @@ class product_product(osv.osv):
             res.setdefault(id, 0.0)
         return res
 
+    def _product_price_lst(self, cr, uid, ids, name, arg, context=None):
+        result = dict.fromkeys(ids, False)
+        for product in self.browse(cr, SUPERUSER_ID, ids, context=context):
+            result[product.id] = product.product_tmpl_id.taxes_id.compute_all(product.price, 1, inverce=False)['total_included']
+        return result
+
     def view_header_get(self, cr, uid, view_id, view_type, context=None):
         if context is None:
             context = {}
@@ -896,11 +954,11 @@ class product_product(osv.osv):
             return _('Products: ') + self.pool.get('product.category').browse(cr, uid, context['categ_id'], context=context).name
         return res
 
-    def _product_lst_price(self, cr, uid, ids, name, arg, context=None):
+    def _product_list_price(self, cr, uid, ids, name, arg, context=None):
         product_uom_obj = self.pool.get('product.uom')
         res = dict.fromkeys(ids, 0.0)
 
-        for product in self.browse(cr, uid, ids, context=context):
+        for product in self.browse(cr, SUPERUSER_ID, ids, context=context):
             if 'uom' in context:
                 uom = product.uos_id or product.uom_id
                 res[product.id] = product_uom_obj._compute_price(cr, uid,
@@ -908,20 +966,33 @@ class product_product(osv.osv):
             else:
                 res[product.id] = product.list_price
             res[product.id] =  res[product.id] + product.price_extra
-
+            #res[product.id] = product.product_tmpl_id.taxes_id.compute_all(res[product.id], 1, inverce=False)['total_included']
         return res
 
-    def _set_product_lst_price(self, cr, uid, id, name, value, args, context=None):
+    def _product_lst_price(self, cr, uid, ids, name, arg, context=None):
+        product_uom_obj = self.pool.get('product.uom')
+        res = dict.fromkeys(ids, 0.0)
+
+        for product in self.browse(cr, SUPERUSER_ID, ids, context=context):
+            res[product.id] = product.product_tmpl_id.taxes_id.compute_all(product.list_vprice, 1, inverce=False)['total_included']
+        return res
+
+    def _set_product_list_price(self, cr, uid, id, name, value, args, context=None):
         product_uom_obj = self.pool.get('product.uom')
 
-        product = self.browse(cr, uid, id, context=context)
+        product = self.browse(cr, SUPERUSER_ID, id, context=context)
         if 'uom' in context:
             uom = product.uos_id or product.uom_id
             value = product_uom_obj._compute_price(cr, uid,
                     context['uom'], value, uom.id)
         value =  value - product.price_extra
-        
+        #product.product_tmpl_id.taxes_id.compute_all(value, 1, inverce=True)['total_included']
         return product.write({'list_price': value})
+
+    def _set_product_lst_price(self, cr, uid, id, name, value, args, context=None):
+        product = self.browse(cr, SUPERUSER_ID, id, context=context)
+        product.product_tmpl_id.taxes_id.compute_all(product.lst_price, 1, inverce=True)['total_included']
+        return product.write({'lst_price': value})
 
     def _get_partner_code_name(self, cr, uid, ids, product, partner_id, context=None):
         for supinfo in product.seller_ids:
@@ -989,11 +1060,20 @@ class product_product(osv.osv):
             result[product.id] = price_extra
         return result
 
+    def _get_price_extra_lst(self, cr, uid, ids, name, args, context=None):
+        result = dict.fromkeys(ids, False)
+        for product in self.browse(cr, SUPERUSER_ID, ids, context=context):
+            result[product.id] = product.product_tmpl_id.taxes_id.compute_all(product.price_extra, 1, inverce=False)['total_included']
+        return result
+
     _columns = {
         'price': fields.function(_product_price, type='float', string='Price', digits_compute=dp.get_precision('Product Price')),
         'price_extra': fields.function(_get_price_extra, type='float', string='Variant Extra Price', help="This is the sum of the extra price of all attributes", digits_compute=dp.get_precision('Product Price')),
+        'price_lst': fields.function(_product_price_lst, type='float', string='Price', digits_compute=dp.get_precision('Product Price'), store=False),
+        'price_extra_lst': fields.function(_get_price_extra_lst, type='float', string='Variant Extra Price', help="This is the sum of the extra price of all attributes", digits_compute=dp.get_precision('Product Price'), store=False),
+        'list_vprice': fields.function(_product_list_price, fnct_inv=_set_product_list_price, type='float', string='Public Price wh VAT', digits_compute=dp.get_precision('Product Price')),
         'lst_price': fields.function(_product_lst_price, fnct_inv=_set_product_lst_price, type='float', string='Public Price', digits_compute=dp.get_precision('Product Price')),
-        'diff_price_vat': fields.boolean('is have VAT price', help="If unchecked, it will allow to work with two price one for sale/purchase and one for VAT calculations."),
+        #'diff_price_vat': fields.boolean('is have VAT price', help="If unchecked, it will allow to work with two price one for sale/purchase and one for VAT calculations."),
         'code': fields.function(_product_code, type='char', string='Internal Reference'),
         'partner_ref' : fields.function(_product_partner_ref, type='char', string='Customer ref'),
         'default_code' : fields.char('Internal Reference', select=True),
@@ -1006,7 +1086,7 @@ class product_product(osv.osv):
         }, select=True),
         'attribute_value_ids': fields.many2many('product.attribute.value', id1='prod_id', id2='att_id', string='Attributes', readonly=True, ondelete='restrict'),
         'is_product_variant': fields.function( _is_product_variant_impl, type='boolean', string='Is product variant'),
-
+        # 'type': fields.related('product_tmpl_id', 'type', type='many2one', relation='product.template', string='Product type'),
         # image: all image fields are base64 encoded and PIL-supported
         'image_variant': fields.binary("Variant Image",
             help="This field holds the image used as image for the product variant, limited to 1024x1024px."),

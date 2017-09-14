@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<openerp>
+<data>
+    <!-- Add image field -->
+    <record model="ir.ui.view" id="res_lang_form">
+            <field name="name">res.lang.form</field>
+            <field name="model">res.lang</field>
+            <field name="inherit_id" ref="base.res_lang_form"/>
+            <field name="groups_id" eval="[(4, ref('product.group_sale_pricelist')), (4, ref('product.group_purchase_pricelist'))]"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='iso_code']" position="after">
+                    <newline/>
+                    <field name="currency_id" groups="base.group_multi_currency"/>
+                    <field name="property_product_pricelist" filter_domain="['|',('currency_id','=',self)]" groups="product.group_sale_pricelist"/>
+                </xpath>
+            </field>
+    </record>
+</data>
+</openerp>

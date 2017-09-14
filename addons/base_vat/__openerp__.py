@@ -20,7 +20,7 @@
 ##############################################################################
 
 {
-    'name': 'VAT Number Validation',
+    'name': 'VAT Number Validation fix',
     'version': '1.0',
     'category': 'Hidden/Dependency',
     'description': """

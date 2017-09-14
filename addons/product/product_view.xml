@@ -74,7 +74,16 @@
                                     <group>
                                         <field name="type" on_change="onchange_type(type)"/>
                                         <field name="uom_id" on_change="onchange_uom(uom_id,uom_po_id)" groups="product.group_uom"/>
+                                        <!--
+                                        <label for="list_price"/>
+                                        <div name="list_price" >
+                                            <field name="list_price" class="oe_inline"/>
+                                            <field name="currency_id" class="oe_inline"/>
+                                        </div>
+                                        -->
+                                        <field name="currency_id"/>
                                         <field name="list_price"/>
+                                        <!-- <field name="diff_price_vat"/>  -->
                                     </group>
                                     <group>
                                         <field name="active"/>
@@ -293,6 +302,7 @@
                                     <div name="tags"/>
                                     <ul>
                                         <li>Price: <field name="lst_price"></field></li>
+                                        <li>Wh VAT: <field name="list_price"></field></li>
                                     </ul>
                                 </div>
                             </div>
@@ -331,6 +341,7 @@
                     <field name="name"/>
                     <field name="attribute_value_ids" widget="many2many_tags"/>
                     <field name="lst_price"/>
+                    <field name="list_vprice"/>
                     <field name="price" invisible="not context.get('pricelist',False)"/>
                     <field name="uom_id"/>
                     <field name="ean13"/>
@@ -355,7 +366,7 @@
                     <field name="default_code"/>
                 </field>
                 <field name="list_price" position="attributes">
-                   <attribute name="name">lst_price</attribute>
+                   <attribute name="name">list_vprice</attribute>
                 </field>
                 <field name="name" position="replace">
                     <field name="name" attrs="{'invisible': [('id', '!=', False)]}"/>
@@ -388,6 +399,7 @@
                                     <div name="tags"/>
                                     <ul>
                                         <li>Price: <field name="lst_price"></field></li>
+                                        <li>Wh VAT: <field name="list_vprice"></field></li>
                                     </ul>
                                 </div>
                             </div>

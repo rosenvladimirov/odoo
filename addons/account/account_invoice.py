@@ -21,6 +21,8 @@
 
 import logging
 import itertools
+import math
+
 from lxml import etree
 
 from openerp import models, fields, api, _
@@ -204,6 +206,12 @@ class account_invoice(models.Model):
             partial_lines += line
         self.payment_ids = (lines - partial_lines).sorted()
 
+#    def _compute_dp_discount(self):
+#        self.display_discounts
+
+#    def _set_compute_dp_discount(self, value):
+#        self.display_discounts = value
+
     name = fields.Char(string='Reference/Description', index=True,
         readonly=True, states={'draft': [('readonly', False)]})
     origin = fields.Char(string='Source Document',
@@ -211,7 +219,7 @@ class account_invoice(models.Model):
         readonly=True, states={'draft': [('readonly', False)]})
     supplier_invoice_number = fields.Char(string='Supplier Invoice Number',
         help="The reference of this invoice as provided by the supplier.",
-        required=False, readonly=True, states={'draft': [('readonly', False),('required',True)]})
+        readonly=True, states={'draft': [('readonly', False),('required',True)]})
     type = fields.Selection([
             ('out_invoice','Customer Invoice'),
             ('in_invoice','Supplier Invoice'),
@@ -327,9 +335,16 @@ class account_invoice(models.Model):
         default=lambda self: self.env.user)
     fiscal_position = fields.Many2one('account.fiscal.position', string='Fiscal Position',
         readonly=True, states={'draft': [('readonly', False)]})
+    pricelist_id = fields.Many2one(
+        comodel_name='product.pricelist', string='Pricelist',
+        help="The pricelist of the partner, when the invoice is created"
+        " or the partner has changed. This is a technical field used"
+        " for reporting.")
     commercial_partner_id = fields.Many2one('res.partner', string='Commercial Entity',
         related='partner_id.commercial_partner_id', store=True, readonly=True,
         help="The commercial entity that will be used on Journal Entries for this invoice")
+#    display_discounts = fields.Boolean(string="Show discount", readonly=True, compute='_compute_dp_discount',
+#        inverse='_set_compute_dp_discount', multi="display_discounts", store=False, help="Show or not margin from pricelist")
 
     _sql_constraints = [
         ('number_uniq', 'unique(number, company_id, journal_id, type)',
@@ -415,7 +430,7 @@ class account_invoice(models.Model):
             default_model='account.invoice',
             default_res_id=self.id,
             default_use_template=bool(template),
-            default_template_id=template.id,
+            default_template_id=template and template.id or False,
             default_composition_mode='comment',
             mark_invoice_as_sent=True,
         )
@@ -451,11 +466,20 @@ class account_invoice(models.Model):
         payment_term_id = False
         fiscal_position = False
         bank_id = False
+        pricelist_id = False
 
+        p = self.env['res.partner'].browse(partner_id or False)
         if partner_id:
-            p = self.env['res.partner'].browse(partner_id)
             rec_account = p.property_account_receivable
             pay_account = p.property_account_payable
+            if type in ('out_invoice', 'out_refund'):
+                # Customer Invoices
+                pricelist_id = p.property_product_pricelist.id
+            elif type in ('in_invoice', 'in_refund'):
+                # Supplier Invoices
+                if p._model._columns.get('property_product_pricelist_purchase', False):
+                    pricelist_id = p.property_product_pricelist_purchase.id
+
             if company_id:
                 if p.property_account_receivable.company_id and \
                         p.property_account_receivable.company_id.id != company_id and \
@@ -481,16 +505,19 @@ class account_invoice(models.Model):
                 account_id = pay_account.id
                 payment_term_id = p.property_supplier_payment_term.id
             fiscal_position = p.property_account_position.id
-            bank_id = p.bank_ids and p.bank_ids[0].id or False
 
         result = {'value': {
             'account_id': account_id,
             'payment_term': payment_term_id,
             'fiscal_position': fiscal_position,
+            'pricelist_id': pricelist_id,
         }}
 
-        if type in ('in_invoice', 'in_refund'):
+        if type in ('in_invoice', 'out_refund'):
+            bank_ids = p.commercial_partner_id.bank_ids
+            bank_id = bank_ids[0].id if bank_ids else False
             result['value']['partner_bank_id'] = bank_id
+            result['domain'] = {'partner_bank_id':  [('id', 'in', bank_ids.ids)]}
 
         if payment_term != payment_term_id:
             if payment_term_id:
@@ -777,7 +804,7 @@ class account_invoice(models.Model):
                 total -= line['price']
                 total_currency -= line['amount_currency'] or line['price']
 #            _logger.info("Expand array %s:", (', '.join(line)) )
-            _logger.info("compute totals price %s: amount_currency %s:" % (line['price'], line['amount_currency']))
+#            _logger.info("compute totals price %s: amount_currency %s:" % (line['price'], line['amount_currency']))
 #        _logger.info("compute inv totals: %s: %s: %s:" % (total, total_currency, invoice_move_lines))
         return total, total_currency, invoice_move_lines
 
@@ -833,11 +860,20 @@ class account_invoice(models.Model):
 
             ctx = dict(self._context, lang=inv.partner_id.lang)
 
+            company_currency = inv.company_id.currency_id
             if not inv.date_invoice:
+                # FORWARD-PORT UP TO SAAS-6
+                if inv.currency_id != company_currency and inv.tax_line:
+                    raise except_orm(
+                        _('Warning!'),
+                        _('No invoice date!'
+                            '\nThe invoice currency is not the same than the company currency.'
+                            ' An invoice date is required to determine the exchange rate to apply. Do not forget to update the taxes!'
+                        )
+                    )
                 inv.with_context(ctx).write({'date_invoice': fields.Date.context_today(self)})
             date_invoice = inv.date_invoice
 
-            company_currency = inv.company_id.currency_id
             # create the analytical lines, one move line per invoice line
             iml = inv._get_analytic_lines()
             # check if taxes are all computed
@@ -860,6 +896,11 @@ class account_invoice(models.Model):
                 if (total_fixed + total_percent) > 100:
                     raise except_orm(_('Error!'), _("Cannot create the invoice.\nThe related payment term is probably misconfigured as it gives a computed amount greater than the total invoiced amount. In order to avoid rounding issues, the latest line of your payment term must be of type 'balance'."))
 
+# Rosen fix
+            # Force recomputation of tax_amount, since the rate potentially changed between creation
+            # and validation of the invoice
+            inv._recompute_tax_amount()
+#Rosen fix
             # one move line per tax line
             iml += account_invoice_tax.move_line_get(inv.id, False)
             # one move line per tax line separated movement
@@ -877,7 +918,7 @@ class account_invoice(models.Model):
 #            _logger.info("total: %s total_s: %s" % (total, total_s))
 #            total = total + total_s
 #            total_currency = total_currency + total_currency_s
-            
+
             name = inv.supplier_invoice_number or inv.name or '/'
             totlines = []
             if inv.payment_term:
@@ -925,7 +966,7 @@ class account_invoice(models.Model):
 
             line = [(0, 0, self.line_get_convert(l, part.id, date)) for l in iml]
             line = inv.group_lines(iml, line)
-            _logger.info("action move create line: %s" % line)
+            #_logger.info("action move create line: %s" % line)
             line_s = [(0, 0, self.line_get_convert(l, part.id, date)) for l in iml_s]
             line_s = inv.group_lines(iml_s, line_s)
 #            _logger.info("action move create line: %s %я" % (line, line_s))
@@ -1017,7 +1058,7 @@ class account_invoice(models.Model):
 #        _logger.info("line get convert 2: %s: dt: %s cr: %s:" % (line.get('tax_parent_sign', 0.0), debit, credit))
 #        if not (line.get('tax_parent_sign', 0.0) == 0.0):
 #            debit = line['tax_parent_sign']==-1 and 0.0 or debit
-#            credit = line['tax_parent_sign']==-1 and debit or 0.0          
+#            credit = line['tax_parent_sign']==-1 and debit or 0.0
         _logger.info("line get convert: account id %s: parent sign %s: type %s: dt: %s cr: %s: check parent %s: separate %s: dds id: %s" % (line['account_id'], line.get('tax_parent_sign', 0.0), line.get('type', ''), debit, credit, (line.get('tax_parent_sign', 0.0) != 0.0), line.get('account_separate', False), line.get('tax_code_id', False)))
         return {
             'date_maturity': line.get('date_maturity', False),
@@ -1295,18 +1336,30 @@ class account_invoice(models.Model):
         return account_invoice.pay_and_reconcile(recs, pay_amount, pay_account_id, period_id, pay_journal_id,
                     writeoff_acc_id, writeoff_period_id, writeoff_journal_id, name=name)
 
+    @api.multi
+    def _recompute_tax_amount(self):
+        for invoice in self:
+            if invoice.currency_id != invoice.company_id.currency_id:
+                for line in invoice.tax_line:
+                    tax_amount = line.amount_change(
+                        line.amount, currency_id=invoice.currency_id.id, company_id=invoice.company_id.id,
+                        date_invoice=invoice.date_invoice
+                    )['value']['tax_amount']
+                    line.write({'tax_amount': tax_amount})
+
+
 class account_invoice_line(models.Model):
     _name = "account.invoice.line"
     _description = "Invoice Line"
     _order = "invoice_id,sequence,id"
 
     @api.one
-    @api.depends('price_unit', 'price_unit_vat', 'diff_price_vat', 'discount', 'invoice_line_tax_id', 'quantity',
+    @api.depends('price_unit', 'price_unit_vat', 'discount', 'invoice_line_tax_id', 'quantity',
         'product_id', 'invoice_id.partner_id', 'invoice_id.currency_id')
     def _compute_price(self):
         price = self.price_unit * (1 - (self.discount or 0.0) / 100.0)
-        price_vat = (self.diff_price_vat and self.price_unit_vat > price) and self.price_unit_vat or False
-        _logger.info("_compute_price %s:" % self.diff_price_vat)
+        price_vat = (self.price_unit_vat > price) and self.price_unit_vat or False
+        #_logger.info("_compute_price %s:" % self.diff_price_vat)
         taxes = self.invoice_line_tax_id.compute_all(price, self.quantity, product=self.product_id, partner=self.invoice_id.partner_id, price_unit_vat=price_vat)
         self.price_subtotal = taxes['total']
         if self.invoice_id:
@@ -1324,7 +1377,7 @@ class account_invoice_line(models.Model):
                 price = vals.get('price_unit', 0) * (1 - vals.get('discount', 0) / 100.0)
                 total = total - (price * vals.get('quantity'))
                 taxes = vals.get('invoice_line_tax_id')
-                price_vat = (vals.get('diff_price_vat', False) and vals.get('price_unit_vat', 0) > price) and vals.get('price_unit_vat', 0) or False
+                price_vat = (vals.get('price_unit_vat', 0) > price) and vals.get('price_unit_vat', 0) or False
                 if taxes and len(taxes[0]) >= 3 and taxes[0][2]:
                     taxes = self.env['account.tax'].browse(taxes[0][2])
                     tax_res = taxes.compute_all(price_vat, vals.get('quantity'),
@@ -1346,6 +1399,15 @@ class account_invoice_line(models.Model):
         else:
             return self.env['ir.property'].get('property_account_expense_categ', 'product.category')
 
+    @api.one
+    def _compute_pricelist_dp_discount(self):
+        dp_discount = self.pricelist_discount and self.pricelist_discount*100 or False
+        if dp_discount:
+            #self.invoice_id.display_discounts = True
+            self.pricelist_display_discount = '(%s)' % dp_discount
+        else:
+            self.pricelist_display_discount = ''
+
     name = fields.Text(string='Description', required=True)
     origin = fields.Char(string='Source Document',
         help="Reference of the document that produced this invoice.")
@@ -1364,7 +1426,7 @@ class account_invoice_line(models.Model):
     price_unit = fields.Float(string='Unit Price', required=True,
         digits= dp.get_precision('Product Price'),
         default=_default_price_unit)
-    price_unit_vat = fields.Float(string='Unit Price for VAT', required=True, digits_compute= dp.get_precision('Product Price'), readonly=True, states={'draft': [('readonly', False)]})
+    price_unit_vat = fields.Float(string='Unit Price for VAT', digits_compute= dp.get_precision('Product Price'), states={'draft': [('readonly', False)]})
     diff_price_vat = fields.Boolean(string='is have VAT price', help="If unchecked, it will allow to work with two price one for sale/purchase and one for VAT calculations.")
     price_subtotal = fields.Float(string='Amount', digits= dp.get_precision('Account'),
         store=True, readonly=True, compute='_compute_price')
@@ -1381,6 +1443,12 @@ class account_invoice_line(models.Model):
         related='invoice_id.company_id', store=True, readonly=True)
     partner_id = fields.Many2one('res.partner', string='Partner',
         related='invoice_id.partner_id', store=True, readonly=True)
+    pricelist_discount = fields.Float(string="Pricelist discount", digits= dp.get_precision('Discount'),
+        help="Show margin from pricelist", states={'draft': [('readonly', False)]}, default=0.0)
+    pricelist_display_discount = fields.Char(string="Discount", readonly=True, compute='_compute_pricelist_dp_discount',
+        multi="pricelist_display_discount", store=False, help="Show margin from pricelist")
+    pricelist_base_price = fields.Float(string="Pricelist Base price", digits=dp.get_precision('Account'),
+        help="Show base price from pricelist", states={'draft': [('readonly', False)]}, default=0.0)
 
     @api.model
     def fields_view_get(self, view_id=None, view_type='form', toolbar=False, submenu=False):
@@ -1399,13 +1467,27 @@ class account_invoice_line(models.Model):
             res['arch'] = etree.tostring(doc)
         return res
 
+    @api.cr_uid_ids_context
+    def price_get_with_attr(self, cr, uid, ids, pricelist, product, qty, partner_id, uom_id, date_inv, context=None):
+        #_logger.info("Take context %s:%s:%s:%s:%s:%s:%s:%s" % (cr, uid, ids, [pricelist], product.id, qty, partner_id, context))
+        ctx = dict(context, uom=uom_id, date=date_inv, )
+        return self.pool.get('product.pricelist').price_get_with_attr(cr, uid, [pricelist], product.id, qty, partner_id, ctx)
+
+    #check points pitstop
+    #@api.multi
+    #def product_id_change_ex(self, pitstop):
+    #    return pitstop
+    #api.depends('pricelist_discount', 'pricelist_base_price')
     @api.multi
-    def product_id_change(self, product, uom_id, qty=0, name='', type='out_invoice',
+    def product_id_change(self, pricelist, product, uom_id, date_inv, qty=0, name='', type='out_invoice',
             partner_id=False, fposition_id=False, price_unit=False, currency_id=False,
             company_id=None):
         context = self._context
         company_id = company_id if company_id is not None else context.get('company_id', False)
         self = self.with_context(company_id=company_id, force_company=company_id)
+        warning = False
+        warning_msgs = ''
+        price_attr = False
 
         if not partner_id:
             raise except_orm(_('No Partner Defined!'), _("You must first select a partner!"))
@@ -1423,7 +1505,7 @@ class account_invoice_line(models.Model):
         if part.lang:
             self = self.with_context(lang=part.lang)
         product = self.env['product.product'].browse(product)
-
+        _logger.info("Product id change %s:%s:%s:%s" % (pricelist, product, qty, company_id))
         values['name'] = product.partner_ref
         if type in ('out_invoice', 'out_refund'):
             account = product.property_account_income or product.categ_id.property_account_income_categ
@@ -1445,13 +1527,34 @@ class account_invoice_line(models.Model):
         fp_taxes = fpos.map_tax(taxes)
         values['invoice_line_tax_id'] = fp_taxes.ids
 
+        # get price
+        if not pricelist:
+            warn_msg = _('You have to select a pricelist or a customer in the sales form !\n'
+                    'Please set one before choosing a product.')
+            warning_msgs += _("No Pricelist ! : ") + warn_msg +"\n\n"
+            price = 0.0
+        else:
+            price_attr = self.price_get_with_attr(pricelist, product, qty, partner_id, uom_id, date_inv)[pricelist]
+            price = price_attr['price']
+            values['pricelist_discount'] = price_attr['price_discount'] and price_attr['price_discount'] or 0.0
+            values['pricelist_base_price'] = price_attr['base_price'] and price_attr['base_price'] or 0.0
+
         if type in ('in_invoice', 'in_refund'):
-            if price_unit and price_unit != product.standard_price:
+#            if price_unit and price_unit != product.standard_price:
+            if price_unit and price_unit != price:
                 values['price_unit'] = price_unit
             else:
-                values['price_unit'] = self.env['account.tax']._fix_tax_included_price(product.standard_price, taxes, fp_taxes.ids)
+                if price is False:
+                    warn_msg = _("Cannot find a pricelist line matching this product and quantity.\n"
+                            "You have to change either the product, the quantity or the pricelist.")
+
+                    warning_msgs += _("No valid pricelist line found ! :") + warn_msg +"\n\n"
+                else:
+#                    values['price_unit'] = self.env['account.tax']._fix_tax_included_price(product.standard_price, taxes, fp_taxes.ids)
+                    values['price_unit'] = self.env['account.tax']._fix_tax_included_price(price, taxes, fp_taxes.ids)
         else:
-            values['price_unit'] = self.env['account.tax']._fix_tax_included_price(product.lst_price, taxes, fp_taxes.ids)
+#            values['price_unit'] = self.env['account.tax']._fix_tax_included_price(product.lst_price, taxes, fp_taxes.ids)
+            values['price_unit'] = self.env['account.tax']._fix_tax_included_price(price, taxes, fp_taxes.ids)
 
         values['uos_id'] = product.uom_id.id
         if uom_id:
@@ -1471,19 +1574,26 @@ class account_invoice_line(models.Model):
             if values['uos_id'] and values['uos_id'] != product.uom_id.id:
                 values['price_unit'] = self.env['product.uom']._compute_price(
                     product.uom_id.id, values['price_unit'], values['uos_id'])
-
-        return {'value': values, 'domain': domain}
+        if warning_msgs:
+            warning = {
+                       'title': _('Configuration Error!'),
+                       'message' : warning_msgs
+                    }
+        _logger.info("Price is %s:%s:%s" % (price, price_unit, values))
+        #values = self.product_id_change_ex({"result": values, "price_attr": price_attr})['result']
+        return {'value': values, 'domain': domain, 'warning': warning}
 
     @api.multi
-    def uos_id_change(self, product, uom, qty=0, name='', type='out_invoice', partner_id=False,
+    def uos_id_change(self, pricelist, product, uom, date_inv, qty=0, name='', type='out_invoice', partner_id=False,
             fposition_id=False, price_unit=False, currency_id=False, company_id=None):
+        #_logger.info("Uos on change %s:%s:%s:%s:%s:%s:%s:%s:%s:%s:%s:%s" % (pricelist, product, uom, date_inv, qty, name, type, partner_id,fposition_id,price_unit,currency_id,company_id))
         context = self._context
         company_id = company_id if company_id != None else context.get('company_id', False)
         self = self.with_context(company_id=company_id)
-
+        _logger.info("Contex %s:%s" % (company_id, context))
         result = self.product_id_change(
-            product, uom, qty, name, type, partner_id, fposition_id, price_unit,
-            currency_id, company_id=company_id,
+            pricelist, product, uom, date_inv, qty=qty, name=name, type=type, partner_id=partner_id, fposition_id=fposition_id, price_unit=price_unit,
+            currency_id=currency_id, company_id=company_id,
         )
         warning = {}
         if not uom:
@@ -1514,8 +1624,8 @@ class account_invoice_line(models.Model):
             res.append(mres)
             tax_code_found = False
             price = (line.price_unit * (1.0 - (line.discount or 0.0) / 100.0))
-            price_vat = line.price_unit_vat if (line.diff_price_vat and line.price_unit_vat > price) else False
-            _logger.info("Line id: %s account id: %s price: %s: %s: %s:" % (mres['invl_id'], mres['account_id'], mres['price'], line.diff_price_vat, line.price_unit_vat))
+            price_vat = line.price_unit_vat if (line.price_unit_vat > price) else False
+            # _logger.info("Line id: %s account id: %s price: %s: %s: %s:" % (mres['invl_id'], mres['account_id'], mres['price'], line.diff_price_vat, line.price_unit_vat))
             taxes = line.invoice_line_tax_id.compute_all(price, line.quantity, line.product_id, inv.partner_id, price_unit_vat=price_vat)['taxes']
             for tax in taxes:
                 if inv.type in ('out_invoice', 'in_invoice'):
@@ -1539,7 +1649,7 @@ class account_invoice_line(models.Model):
 
                 res[-1]['tax_code_id'] = tax_code_id
                 res[-1]['tax_amount'] = currency.compute(tax_amount, company_currency)
-                _logger.info("Get line price: %s and tax sing:%s and tax:%s" % (tax["price_unit"], tax["tax_parent_sign"], tax['amount']))
+                # _logger.info("Get line price: %s and tax sing:%s and tax:%s" % (tax["price_unit"], tax["tax_parent_sign"], tax['amount']))
         return res
 
     @api.model
@@ -1561,7 +1671,7 @@ class account_invoice_line(models.Model):
     # Set the tax field according to the account and the fiscal position
     #
     @api.multi
-    def onchange_account_id(self, product_id, partner_id, inv_type, fposition_id, account_id):
+    def onchange_account_id(self, pricelist, product_id, partner_id, inv_type, fposition_id, account_id, date_inv):
         if not account_id:
             return {}
         unique_tax_ids = []
@@ -1570,7 +1680,8 @@ class account_invoice_line(models.Model):
             fpos = self.env['account.fiscal.position'].browse(fposition_id)
             unique_tax_ids = fpos.map_tax(account.tax_ids).ids
         else:
-            product_change_result = self.product_id_change(product_id, False, type=inv_type,
+            _logger.info("Account id change %s" % pricelist)
+            product_change_result = self.product_id_change(pricelist, product_id, False, date_inv, type=inv_type,
                 partner_id=partner_id, fposition_id=fposition_id, company_id=account.company_id.id)
             if 'invoice_line_tax_id' in product_change_result.get('value', {}):
                 unique_tax_ids = product_change_result['value']['invoice_line_tax_id']
@@ -1640,7 +1751,7 @@ class account_invoice_tax(models.Model):
             currency = self.env['res.currency'].browse(currency_id)
             currency = currency.with_context(date=date_invoice or fields.Date.context_today(self))
             amount = currency.compute(amount, company.currency_id, round=False)
-        tax_sign = (self.tax_amount / self.amount) if self.amount else 1
+        tax_sign = math.copysign(1, (self.tax_amount * self.amount))
         return {'value': {'tax_amount': amount * tax_sign}}
 
     @api.v8
@@ -1650,7 +1761,7 @@ class account_invoice_tax(models.Model):
         company_currency = invoice.company_id.currency_id
         for line in invoice.invoice_line:
             price = (line.price_unit * (1 - (line.discount or 0.0) / 100.0))
-            price_vat =  (line.diff_price_vat and line.price_unit_vat > price) and line.price_unit_vat or False
+            price_vat =  (line.price_unit_vat > price) and line.price_unit_vat or False
             taxes = line.invoice_line_tax_id.compute_all(price, line.quantity, line.product_id, invoice.partner_id, price_unit_vat=price_vat)['taxes']
             for tax in taxes:
                 val = {

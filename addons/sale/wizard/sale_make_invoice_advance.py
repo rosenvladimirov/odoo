@@ -37,7 +37,7 @@ class sale_advance_payment_inv(osv.osv_memory):
                 Use Some Order Lines to invoice a selection of the sales order lines."""),
         'qtty': fields.float('Quantity', digits=(16, 2), required=True),
         'product_id': fields.many2one('product.product', 'Advance Product',
-            domain=[('type', '=', 'service')],
+            domain=[('type', '=', 'money')],
             help="""Select a product of type service which is called 'Advance Product'.
                 You may have to create it and set it as a default value on this field."""),
         'amount': fields.float('Advance Amount', digits_compute= dp.get_precision('Account'),
@@ -78,11 +78,12 @@ class sale_advance_payment_inv(osv.osv_memory):
         inv_line_obj = self.pool.get('account.invoice.line')
         wizard = self.browse(cr, uid, ids[0], context)
         sale_ids = context.get('active_ids', [])
+        tax_obj = self.pool.get('account.tax')
 
         result = []
         for sale in sale_obj.browse(cr, uid, sale_ids, context=context):
-            val = inv_line_obj.product_id_change(cr, uid, [], wizard.product_id.id,
-                    False, partner_id=sale.partner_id.id, fposition_id=sale.fiscal_position.id)
+            val = inv_line_obj.product_id_change(cr, uid, [], False, wizard.product_id.id,
+                    False, False, partner_id=sale.partner_id.id, fposition_id=sale.fiscal_position.id)
             res = val['value']
 
             # determine and check income account
@@ -91,6 +92,7 @@ class sale_advance_payment_inv(osv.osv_memory):
                             'property_account_income_categ', 'product.category', context=context)
                 prop_id = prop and prop.id or False
                 account_id = fiscal_obj.map_account(cr, uid, sale.fiscal_position or False, prop_id)
+                #tax_id = fiscal_obj.map_tax(cr, uid, sale.fiscal_position or False, wizard.product_id, context=context)
                 if not account_id:
                     raise osv.except_osv(_('Configuration Error!'),
                             _('There is no income account defined as global property.'))
@@ -114,7 +116,7 @@ class sale_advance_payment_inv(osv.osv_memory):
                         'origin': sale.name,
                         'account_id': res['account_id'],
                         'price_unit': (sale_line.product_uos_qty * sale_line.price_unit * wizard.amount) / 100,
-                        'price_unit_vat': 0.0,
+                        'price_unit_vat': (sale_line.product_uos_qty * sale_line.price_unit_vat * wizard.amount) / 100,
                         'quantity': 1.0,
                         'discount': sale_line.discount,
                         'uos_id': res.get('uos_id', False),
@@ -136,7 +138,10 @@ class sale_advance_payment_inv(osv.osv_memory):
 
                 # determine taxes
                 if res.get('invoice_line_tax_id'):
+                    taxes = tax_obj.browse(cr, uid, res.get('invoice_line_tax_id'), context=context)
                     res['invoice_line_tax_id'] = [(6, 0, res.get('invoice_line_tax_id'))]
+                    if taxes:
+                        inv_amount = taxes.compute_all(inv_amount, 1, inverce=True)['total_included']
                 else:
                     res['invoice_line_tax_id'] = False
 
@@ -163,6 +168,7 @@ class sale_advance_payment_inv(osv.osv_memory):
                 'reference': False,
                 'account_id': sale.partner_id.property_account_receivable.id,
                 'partner_id': sale.partner_invoice_id.id,
+                'pricelist_id': sale.pricelist_id.id,
                 'invoice_line': inv_lines_values,
                 'currency_id': sale.pricelist_id.currency_id.id,
                 'comment': '',

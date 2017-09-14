@@ -42,17 +42,15 @@
         </record>
 
         <!-- Account Templates-->
-        <!-- Block by Rosen
         <record id="conf_chart0" model="account.account.template">
             <field name="code">0</field>
             <field name="name">Configurable Account Chart</field>
             <field name="type">view</field>
             <field name="user_type" ref="data_account_type_view"/>
         </record>
-	-->
 
-        <!-- Balance Sheet -->
-        <!-- Block by Rosen
+           <!-- Balance Sheet -->
+
         <record id="conf_bal" model="account.account.template">
             <field name="code">1</field>
             <field name="name">Balance Sheet</field>
@@ -175,10 +173,9 @@
                         <field name="type">other</field>
                         <field name="user_type" ref="data_account_type_expense"/>
                     </record>
-	-->
 
         <!-- Profit and Loss -->
-        <!-- Block by Rosen
+
         <record id="conf_gpf" model="account.account.template">
             <field name="code">2</field>
             <field name="name">Profit and Loss</field>
@@ -242,12 +239,12 @@
                     <field name="type">other</field>
                     <field name="user_type" ref="data_account_type_expense"/>
                 </record>
-	-->
+
         <!-- Taxes -->
         <!-- TAX Code Definitions -->
 
         <!-- Invoiced TAX -->
-        <!-- Block by Rosen
+
         <record id="tax_code_chart_root" model="account.tax.code.template">
             <field name="name">Plan Fees </field>
         </record>
@@ -256,9 +253,8 @@
                 <field name="name">Tax Balance to Pay</field>
                 <field name="parent_id" ref="tax_code_chart_root"/>
             </record>
-	-->
+
             <!-- Input TAX -->
-        <!-- Block by Rosen
             <record id="tax_code_input" model="account.tax.code.template">
                 <field name="name">Tax Received</field>
                 <field name="parent_id" ref="tax_code_balance_net"/>
@@ -284,9 +280,9 @@
                     <field name="name">Tax Received Rate O (Out of scope)</field>
                     <field name="parent_id" ref="tax_code_input"/>
                 </record>
-	 -->
+
             <!-- Output TAX -->
-        <!-- Block by Rosen
+
             <record id="tax_code_output" model="account.tax.code.template">
                 <field name="name">Tax Paid</field>
                 <field name="parent_id" ref="tax_code_balance_net"/>
@@ -311,12 +307,12 @@
                     <field name="name">Tax Paid Rate O (Out of scope)</field>
                     <field name="parent_id" ref="tax_code_output"/>
                 </record>
-	   -->
+
 
             <!-- Invoiced Base of TAX -->
 
             <!-- Purchases -->
-        <!-- Block by Rosen
+
             <record id="tax_code_base_net" model="account.tax.code.template">
                 <field name="name">Tax Bases</field>
                 <field name="parent_id" ref="tax_code_chart_root"/>
@@ -346,9 +342,9 @@
                         <field name="name">Taxable Purchases Type O (Out of scope)</field>
                         <field name="parent_id" ref="tax_code_base_purchases"/>
                     </record>
-	-->
+
                 <!-- Sales -->
-        <!-- Block by Rosen
+
                 <record id="tax_code_base_sales" model="account.tax.code.template">
                     <field name="name">Base of Taxable Sales</field>
                     <field name="parent_id" ref="tax_code_base_net"/>
@@ -387,11 +383,10 @@
             <field name="property_account_expense_opening" ref="conf_o_expense"/>
             <field name="complete_tax_set" eval="False"/>
         </record>
-	-->
 
          <!-- VAT Codes -->
         <!-- Purchases + Output VAT -->
-        <!-- Block by Rosen
+
         <record id="otaxs" model="account.tax.template">
             <field name="chart_template_id" ref="configurable_chart_template"/>
             <field name="name">OTAX S</field>
@@ -404,6 +399,9 @@
             <field name="ref_base_code_id" ref="tax_code_purch_S"/>
             <field name="ref_tax_code_id" ref="tax_code_output_S"/>
             <field name="type_tax_use">purchase</field>
+
+            <field name="tax_credit_payable">taxcredit</field>
+
         </record>
 
         <record id="otaxr" model="account.tax.template">
@@ -418,6 +416,9 @@
             <field name="ref_base_code_id" ref="tax_code_purch_R"/>
             <field name="ref_tax_code_id" ref="tax_code_output_R"/>
             <field name="type_tax_use">purchase</field>
+
+            <field name="tax_credit_payable">taxcredit</field>
+
         </record>
 
         <record id="otaxx" model="account.tax.template">
@@ -432,6 +433,9 @@
             <field name="ref_base_code_id" ref="tax_code_purch_X"/>
             <field name="ref_tax_code_id" ref="tax_code_output_X"/>
             <field name="type_tax_use">purchase</field>
+
+            <field name="tax_credit_payable">taxcredit</field>
+
         </record>
 
         <record id="otaxo" model="account.tax.template">
@@ -446,11 +450,13 @@
             <field name="ref_base_code_id" ref="tax_code_purch_O"/>
             <field name="ref_tax_code_id" ref="tax_code_output_O"/>
             <field name="type_tax_use">purchase</field>
+
+            <field name="tax_credit_payable">taxcredit</field>
+
         </record>
-	-->
 
         <!-- Sales + Input VAT -->
-        <!-- Block by Rosen
+
         <record id="itaxs" model="account.tax.template">
             <field name="chart_template_id" ref="configurable_chart_template"/>
             <field name="name">ITAX S</field>
@@ -463,6 +469,9 @@
             <field name="ref_base_code_id" ref="tax_code_sales_S"/>
             <field name="ref_tax_code_id" ref="tax_code_input_S"/>
             <field name="type_tax_use">sale</field>
+
+            <field name="tax_credit_payable">taxpay</field>
+
         </record>
 
         <record id="itaxr" model="account.tax.template">
@@ -477,6 +486,9 @@
             <field name="ref_base_code_id" ref="tax_code_sales_R"/>
             <field name="ref_tax_code_id" ref="tax_code_input_R"/>
             <field name="type_tax_use">sale</field>
+
+            <field name="tax_credit_payable">taxpay</field>
+
         </record>
 
         <record id="itaxx" model="account.tax.template">
@@ -491,6 +503,9 @@
             <field name="ref_base_code_id" ref="tax_code_sales_X"/>
             <field name="ref_tax_code_id" ref="tax_code_input_X"/>
             <field name="type_tax_use">sale</field>
+
+            <field name="tax_credit_payable">taxpay</field>
+
         </record>
 
         <record id="itaxo" model="account.tax.template">
@@ -505,14 +520,17 @@
             <field name="ref_base_code_id" ref="tax_code_sales_O"/>
             <field name="ref_tax_code_id" ref="tax_code_input_O"/>
             <field name="type_tax_use">sale</field>
+
+            <field name="tax_credit_payable">taxpay</field>
+
         </record>
-	-->
+
 
 
         <!-- = = = = = = = = = = = = = = = -->
          <!-- Fiscal Mapping Templates     -->
         <!-- = = = = = = = = = = = = = = = -->
- <!--
+
 
         <record id="fiscal_position_normal_taxes_template1" model="account.fiscal.position.template">
             <field name="name">Normal Taxes</field>
@@ -523,11 +541,12 @@
             <field name="name">Tax Exempt</field>
             <field name="chart_template_id" ref="configurable_chart_template"/>
         </record>
--->
+
         <!-- = = = = = = = = = = = = = = = -->
         <!-- Fiscal Position Tax Templates -->
         <!-- = = = = = = = = = = = = = = = -->
-        <!-- Block by Rosen
+
+
         <record id="fiscal_position_normal_taxes" model="account.fiscal.position.tax.template">
             <field name="position_id" ref="fiscal_position_normal_taxes_template1"/>
             <field name="tax_src_id" ref="itaxs"/>
@@ -539,10 +558,10 @@
             <field name="tax_src_id" ref="itaxx"/>
             <field name="tax_dest_id" ref="otaxx"/>
         </record>
-	-->
+
 
         <!--  Assigned Default Taxes For Different Account -->
-        <!-- Block by Rosen
+
         <record id="conf_a_sale" model="account.account.template">
             <field name="tax_ids" eval="[(6,0,[ref('itaxs')])]"/>
         </record>
@@ -556,6 +575,7 @@
             <field name="action_id" ref="account.action_wizard_multi_chart"/>
             <field name="type">automatic</field>
         </record>
-	-->
+
+
     </data>
 </openerp>

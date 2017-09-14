@@ -25,10 +25,10 @@ from openerp.osv import osv
 class res_currency_account(osv.osv):
     _inherit = "res.currency"
 
-    def _get_conversion_rate(self, cr, uid, from_currency, to_currency, context=None):
+    def _get_conversion_rate(self, cr, uid, from_currency, to_currency, rate_type=None, context=None):
         if context is None:
             context = {}
-        rate = super(res_currency_account, self)._get_conversion_rate(cr, uid, from_currency, to_currency, context=context)
+        rate = super(res_currency_account, self)._get_conversion_rate(cr, uid, from_currency, to_currency, rate_type=rate_type, context=context)
         #process the case where the account doesn't work with an outgoing currency rate method 'at date' but 'average'
         account = context.get('res.currency.compute.account')
         account_invert = context.get('res.currency.compute.account_invert')

@@ -22,6 +22,7 @@
 from operator import itemgetter
 import time
 
+from openerp import SUPERUSER_ID
 from openerp.osv import fields, osv
 from openerp import api
 
@@ -46,7 +47,6 @@ class account_fiscal_position(osv.osv):
 
     _defaults = {
         'active': True,
-        'country_group_id_inverse': False,
     }
 
     def _check_country(self, cr, uid, ids, context=None):
@@ -111,6 +111,7 @@ class account_fiscal_position(osv.osv):
     def get_fiscal_position(self, cr, uid, company_id, partner_id, delivery_id=None, context=None):
         if not partner_id:
             return False
+        context = dict(context or {}, company_id=company_id, force_company=company_id)
         # This can be easily overriden to apply more complex fiscal rules
         part_obj = self.pool['res.partner']
         partner = part_obj.browse(cr, uid, partner_id, context=context)
@@ -131,16 +132,22 @@ class account_fiscal_position(osv.osv):
             domains += [[('auto_apply', '=', True), ('vat_required', '=', False)]]
 
         for domain in domains:
+            fp = self.browse(cr, uid, [], context=context)
+            if fp.country_group_id_inverse:
+                compare_domain = '!='
+            else:
+                compare_domain = '='
+
             if delivery.country_id.id:
                 fiscal_position_ids = self.search(cr, uid, domain + [('country_id', '=', delivery.country_id.id)], context=context, limit=1)
                 if fiscal_position_ids:
                     return fiscal_position_ids[0]
 
-                fiscal_position_ids = self.search(cr, uid, domain + [('country_group_id_inverse','=', False), ('country_group_id.country_ids', '=', delivery.country_id.id)], context=context, limit=1)
+                fiscal_position_ids = self.search(cr, uid, domain + [('country_group_id.country_ids', compare_domain, delivery.country_id.id)], context=context, limit=1)
                 if fiscal_position_ids:
                     return fiscal_position_ids[0]
 
-            fiscal_position_ids = self.search(cr, uid, domain + [('country_id', '=', None), ('country_group_id', compare_domain, None)], context=context, limit=1)
+            fiscal_position_ids = self.search(cr, uid, domain + [('country_id', '=', None), ('country_group_id', '=', None)], context=context, limit=1)
             if fiscal_position_ids:
                 return fiscal_position_ids[0]
         return False
@@ -278,6 +285,7 @@ class res_partner(osv.osv):
                          AND cr.currency_id = %%s
                          AND (COALESCE(account_invoice_report.date, NOW()) >= cr.date_start)
                          AND (COALESCE(account_invoice_report.date, NOW()) < cr.date_end OR cr.date_end IS NULL)
+                         AND account_invoice_report.type in ('out_invoice', 'out_refund')
                     """ % where_clause
 
             # price_total is in the currency with rate = 1
@@ -320,7 +328,8 @@ class res_partner(osv.osv):
         return False
 
     def mark_as_reconciled(self, cr, uid, ids, context=None):
-        return self.write(cr, uid, ids, {'last_reconciliation_date': time.strftime('%Y-%m-%d %H:%M:%S')}, context=context)
+        self.pool['account.move.reconcile'].check_access_rights(cr, uid, 'write')
+        return self.write(cr, SUPERUSER_ID, ids, {'last_reconciliation_date': time.strftime('%Y-%m-%d %H:%M:%S')}, context=context)
 
     _columns = {
         'vat_subjected': fields.boolean('VAT Legal Statement', help="Check this box if the partner is subjected to the VAT. It will be used for the VAT legal statement."),

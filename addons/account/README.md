@@ -1,3 +1,10 @@
+This module is a fix
+--------------------
+Fixing of problems with:
+1. Pricelist
+2. Accounting
+3. Intracomunitaru deals.
+
 Odoo Accounting
 ---------------
 

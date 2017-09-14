@@ -113,7 +113,7 @@
                         </group>
                     </group>
                     <notebook>
-                        <page string="Order Lines">
+                        <page string="Order Lines" attrs="{'invisible':[('state','=','virtualized')]}">
                             <field name="order_line">
                                 <form string="Sales Order Lines">
                                     <header groups="base.group_user">
@@ -123,7 +123,7 @@
                                     <group>
                                         <group>
                                             <field name="product_id"
-                                                context="{'partner_id':parent.partner_id, 'quantity':product_uom_qty, 'pricelist':parent.pricelist_id, 'diff_price_vat':product_diff_price_vat,'uom':product_uom, 'company_id': parent.company_id}"
+                                                context="{'partner_id':parent.partner_id, 'quantity':product_uom_qty, 'pricelist':parent.pricelist_id, 'uom':product_uom, 'company_id': parent.company_id}"
                                                 groups="base.group_user"
                                                 on_change="product_id_change(parent.pricelist_id, product_id, product_uom_qty, False, product_uos_qty, False, name, parent.partner_id, False, True, parent.date_order, False, parent.fiscal_position, False, context)"/>
                                             <label for="product_uom_qty"/>
@@ -142,12 +142,17 @@
                                                 <field name="product_uos" options='{"no_open": True}' class="oe_inline"/>
                                             </div>
                                             <field name="price_unit"/>
-                                            <field name="diff_price_vat" invisible='1'/>
+                                            <!-- <field name="diff_price_vat" invisible="1"/>
                                             <field name="price_unit_vat" attrs="{'invisible':[('diff_price_vat','=',False)]}"/>
+                                            -->
+                                            <field name="price_unit_vat"/>
+                                            <field name="pricelist_base_price" invisible='1'/>
+                                            <field name="pricelist_discount" invisible='1'/>
                                             <label for="discount" groups="sale.group_discount_per_so_line"/>
                                             <div name="discount" groups="sale.group_discount_per_so_line">
                                                 <field name="discount" class="oe_inline"/> %%
                                             </div>
+                                            <!-- <filed name="pricelist_display_discount" readonly="1" groups="sale.group_discount_per_so_line"/> -->
                                         </group>
                                         <group>
                                             <field name="tax_id" widget="many2many_tags" domain="[('parent_id','=',False),('type_tax_use','&lt;&gt;','purchase')]"/>
@@ -159,7 +164,8 @@
                                     <label for="name"/>
                                     <field name="name"/>
                                     <div groups="base.group_no_one">
-                                        <label for="invoice_lines"/>
+                                        <label for="invoice_lines"/>:
+                                        <field name="display_invoiced" class="oe_inline" readonly="1"/>
                                         <field name="invoice_lines"/>
                                     </div>
                                 </form>
@@ -182,9 +188,12 @@
                                     <field name="product_uos_qty" groups="product.group_uos" invisible="1"/>
                                     <field name="product_uos" string="UoS" groups="product.group_uos" invisible="1"/>
                                     <field name="price_unit"/>
-                                    <field name="diff_price_vat" invisible='1'/>
+                                    <!-- <field name="diff_price_vat" invisible="1"/>
                                     <field name="price_unit_vat" attrs="{'invisible':[('diff_price_vat','=',False)]}"/>
+                                    -->
                                     <field name="tax_id" widget="many2many_tags" domain="[('parent_id','=',False),('type_tax_use','&lt;&gt;','purchase')]"/>
+                                    <field name="pricelist_base_price" invisible='1'/>
+                                    <field name="pricelist_discount" invisible='1'/>
                                     <field name="discount" groups="sale.group_discount_per_so_line"/>
                                     <field name="price_subtotal"/>
                                 </tree>
@@ -192,6 +201,8 @@
                             <group class="oe_subtotal_footer oe_right" colspan="2" name="sale_total">
                                 <field name="amount_untaxed" widget='monetary' options="{'currency_field': 'currency_id'}"/>
                                 <field name="amount_tax" widget='monetary' options="{'currency_field': 'currency_id'}"/>
+                                <label for="amount_tax_payable" attrs="{'invisible':[('amount_tax_payable','=',0.0)]}"/>
+                                <field name="amount_tax_payable" nolabel="1" widget="monetary" options="{'currency_field': 'currency_id'}" attrs="{'invisible':[('amount_tax_payable','=',0.0)]}"/>
                                 <div class="oe_subtotal_footer_separator oe_inline">
                                     <label for="amount_total" />
                                     <button name="button_dummy"
@@ -221,6 +232,7 @@
                                 </group>
                             </group>
                         </page>
+
                     </notebook>
                 </sheet>
                 <div class="oe_chatter">
@@ -367,7 +379,7 @@
             <field name="arch" type="xml">
                 <tree string="Sales Order Lines" create="false">
                     <field name="product_id" invisible="1"/>
-                    <field name="order_id"/>
+                    <field name="display_order_id"/>
                     <field name="order_partner_id"/>
                     <field name="name"/>
                     <field name="product_uom_qty" string="Qty"/>
@@ -406,8 +418,10 @@
                         </group>
                         <group>
                             <field name="price_unit"/>
-                            <field name="diff_price_vat" invisible='1'/>
-                            <field name="price_unit_vat" attrs="{'invisible':[('diff_price_vat','=',False)]}"/>
+                            <!-- <field name="diff_price_vat" invisible="1"/>
+                            <field name="price_unit_vat" attrs="{'invisible':[('diff_price_vat','!=',True)]}"/>
+                            -->
+                            <field name="price_unit_vat" />
                             <field name="discount" groups="sale.group_discount_per_so_line"/>
                             <field name="price_subtotal"/>
                             <field name="invoiced"/>

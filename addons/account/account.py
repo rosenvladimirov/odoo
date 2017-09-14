@@ -642,7 +642,7 @@ class account_account(osv.osv):
             done_list = []
         account = self.browse(cr, uid, id, context=context)
         new_child_ids = []
-        default.update(code=_("%s (copy)") % (account['code'] or ''))
+        default.setdefault('code', _("%s (copy)") % (account['code'] or ''))
         if not local:
             done_list = []
         if account.id in done_list:
@@ -1925,7 +1925,7 @@ class account_tax(osv.osv):
         'ref_tax_sign': fields.float('Refund Tax Code Sign', help="Usually 1 or -1.", digits_compute=get_precision_tax()),
         'include_base_amount': fields.boolean('Included in base amount', help="Indicates if the amount of tax must be included in the base amount for the computation of the next taxes"),
         'company_id': fields.many2one('res.company', 'Company', required=True),
-        'description': fields.char('Tax Code'),
+        'description': fields.char('Tax Code', translate=True),
         'price_include': fields.boolean('Tax Included in Price', help="Check this if the price you use on the product and invoices includes this tax."),
         'type_tax_use': fields.selection([('sale','Sale'),('purchase','Purchase'),('all','All')], 'Tax Application', required=True)
 
@@ -2029,7 +2029,7 @@ class account_tax(osv.osv):
                 res.append(tax)
         return res
 
-    def _unit_compute(self, cr, uid, taxes, price_unit, product=None, partner=None, quantity=0, parents=[], separate=False):
+    def _unit_compute(self, cr, uid, taxes, price_unit, product=None, partner=None, quantity=0, parents=[], separate=False, inverce=False):
         taxes = self._applicable(cr, uid, taxes, price_unit ,product, partner)
         res = []
         cur_price_unit=price_unit
@@ -2061,11 +2061,15 @@ class account_tax(osv.osv):
             res.append(data)
             if tax.child_depend:
                 tax_amount = 0.0
-            else:            
+            else:
                 tax_amount = tax.amount
-#            _logger.info("Info compute child_depend: %s tax_parent_sign: %s account_separate: %s" % (tax.child_depend, tax.tax_parent_sign, tax.account_separate))
+#            _logger.info("Info compute child_depend: %s tax_parent_sign: %s account_separate: %s inverce: %s" % (tax.child_depend, tax.tax_parent_sign, tax.account_separate, inverce))
             if tax.type=='percent':
-                amount = cur_price_unit * tax_amount
+                if inverce:
+                    amount = round((cur_price_unit - cur_price_unit/(1+tax_amount))*-1, prec)
+#                    data['price_unit'] = cur_price_unit - amount
+                else:
+                    amount = cur_price_unit * tax_amount
                 data['amount'] = amount
                 data['account_separate'] = False
             elif tax.type=='fixed':
@@ -2084,7 +2088,7 @@ class account_tax(osv.osv):
                 data['balance'] = cur_price_unit
                 data['account_separate'] = False
             elif (tax.type=='balance' and separate == True):
-                data['amount'] = 0.0            
+                data['amount'] = 0.0
                 data['balance'] = True
             elif tax.type=='separate':
                 data['amount'] = 0.0
@@ -2096,8 +2100,8 @@ class account_tax(osv.osv):
 
 #           Force update child configurations
             if parents:
-                data['account_separate'] = parents['account_separate']         
-#            _logger.info("Taxes calculations: type: %s child_depend: %s separate: %s balanse: %s cur_price_unit: %s amount: %s" % (tax.type, tax.child_depend, tax.account_separate, data.get('balance', 0.0), cur_price_unit, data.get('amount', 0.0)))   
+                data['account_separate'] = parents['account_separate']
+            #_logger.info("Taxes calculations: type: %s child_depend: %s separate: %s balanse: %s cur_price_unit: %s amount: %s" % (tax.type, tax.child_depend, tax.account_separate, data.get('balance', 0.0), cur_price_unit, data.get('amount', 0.0)))
             amount2 = data.get('amount', 0.0)
             if tax.child_ids:
                 if tax.child_depend:
@@ -2143,7 +2147,7 @@ class account_tax(osv.osv):
         return self.compute_all(cr, uid, [tax], amount, 1) # TOCHECK may use force_exclude parameter
 
     @api.v7
-    def compute_all(self, cr, uid, taxes, price_unit, quantity, product=None, partner=None, force_excluded=False, price_unit_vat=False):
+    def compute_all(self, cr, uid, taxes, price_unit, quantity, product=None, partner=None, force_excluded=False, price_unit_vat=False, inverce=False):
         """
         :param force_excluded: boolean used to say that we don't want to consider the value of field price_include of
             tax. It's used in encoding by line where you don't matter if you encoded a tax with that boolean to True or
@@ -2168,9 +2172,9 @@ class account_tax(osv.osv):
         tax_compute_precision = precision
         if taxes and taxes[0].company_id.tax_calculation_rounding_method == 'round_globally':
             tax_compute_precision += 5
-        _logger.info("compute_all %s" % (price_unit))
+        #_logger.info("compute_all %s->%s" % (price_unit, inverce))
         totalex = totalin = round(price_unit * quantity, precision)
-        price_unit_vat = price_unit_vat and round(price_unit_vat * quantity, precision) or round(price_unit * quantity, precision) 
+        price_unit_vat = price_unit_vat and round(price_unit_vat * quantity, precision) or round(price_unit * quantity, precision)
         tin = []
         tex = []
         for tax in taxes:
@@ -2187,9 +2191,10 @@ class account_tax(osv.osv):
             totlex_qty = price_unit_vat/quantity
         except:
             pass
-        tex = self._compute(cr, uid, tex, totlex_qty, quantity, product=product, partner=partner, precision=tax_compute_precision)
+        tex = self._compute(cr, uid, tex, totlex_qty, quantity, product=product, partner=partner, precision=tax_compute_precision, inverce=inverce)
         for r in tex:
             totalin += r.get('amount', 0.0)*r.get('tax_parent_sign', 0.0)
+            #_logger.info("compute_all finish %s->%s" % (totalin, inverce))
         return {
             'total': totalex,
             'total_included': totalin,
@@ -2197,16 +2202,16 @@ class account_tax(osv.osv):
         }
 
     @api.v8
-    def compute_all(self, price_unit, quantity, product=None, partner=None, force_excluded=False, price_unit_vat=False):
+    def compute_all(self, price_unit, quantity, product=None, partner=None, force_excluded=False, price_unit_vat=False, inverce=False):
         return account_tax.compute_all(
             self._model, self._cr, self._uid, self, price_unit, quantity,
-            product=product, partner=partner, force_excluded=force_excluded, price_unit_vat=price_unit_vat)
+            product=product, partner=partner, force_excluded=force_excluded, price_unit_vat=price_unit_vat, inverce=inverce)
 
     def compute(self, cr, uid, taxes, price_unit, quantity,  product=None, partner=None):
         _logger.warning("Deprecated, use compute_all(...)['taxes'] instead of compute(...) to manage prices with tax included.")
         return self._compute(cr, uid, taxes, price_unit, quantity, product, partner)
 
-    def _compute(self, cr, uid, taxes, price_unit, quantity, product=None, partner=None, precision=None):
+    def _compute(self, cr, uid, taxes, price_unit, quantity, product=None, partner=None, precision=None, inverce=False):
         """
         Compute tax values for given PRICE_UNIT, QUANTITY and a buyer/seller ADDRESS_ID.
 
@@ -2217,16 +2222,16 @@ class account_tax(osv.osv):
         """
         if not precision:
             precision = self.pool.get('decimal.precision').precision_get(cr, uid, 'Account')
-        res = self._unit_compute(cr, uid, taxes, price_unit, product, partner, quantity)
+        res = self._unit_compute(cr, uid, taxes, price_unit, product, partner, quantity, inverce=inverce)
         total = 0.0
         for r in res:
             if (r.get('balance',False) and r.get('account_separate', False)==False):
                 r['amount'] = round(r.get('balance', 0.0) * quantity, precision) - total
             else:
-#           _logger.info("_Compute before tax amount %s, parent:%s, quantity:%s" % (r.get('amount', 0.0), r.get('tax_parent_sign'), quantity))
+                #_logger.info("_Compute before tax amount %s, parent:%s, quantity:%s" % (r.get('amount', 0.0), r.get('tax_parent_sign'), quantity))
                 r['amount'] = round(r.get('amount', 0.0) * quantity, precision)
                 total += r['amount']
-#       _logger.info("_Compute tax name:%s amount:%s, parent:%s, quantity:%s" % (r.get('name', 0.0), r.get('amount', 0.0), r.get('tax_parent_sign'), quantity))
+                #_logger.info("_Compute tax name:%s amount:%s, parent:%s, quantity:%s" % (r.get('name', 0.0), r.get('amount', 0.0), r.get('tax_parent_sign'), quantity))
         return res
 
     def _fix_tax_included_price(self, cr, uid, price, prod_taxes, line_taxes):
@@ -2307,7 +2312,7 @@ class account_tax(osv.osv):
 
             parent_tax = self._unit_compute_inv(cr, uid, tax.child_ids, amount, product, partner)
             res.extend(parent_tax)
-#    	    _logger.info("_Compute_inv tax name:%s, amount:%s==%s, parent:%s, tax_parent_tot:%s" % (tax.get('name'), tax.get('amount', 0.0), amount, tax.get('tax_parent_sign'), tax_parent_tot))
+#        _logger.info("_Compute_inv tax name:%s, amount:%s==%s, parent:%s, tax_parent_tot:%s" % (tax.get('name'), tax.get('amount', 0.0), amount, tax.get('tax_parent_sign'), tax_parent_tot))
         total = 0.0
         for r in res:
             if r['todo']:
@@ -2376,8 +2381,7 @@ class account_model(osv.osv):
         pt_obj = self.pool.get('account.payment.term')
         period_obj = self.pool.get('account.period')
 
-        if context is None:
-            context = {}
+        context = dict(context or {})
 
         if data.get('date', False):
             context = dict(context)
@@ -2672,7 +2676,7 @@ class account_account_template(osv.osv):
         children_acc_criteria = [('chart_template_id','=', chart_template_id)]
         if template.account_root_id.id:
             children_acc_criteria = ['|'] + children_acc_criteria + ['&',('parent_id','child_of', [template.account_root_id.id]),('chart_template_id','=', False)]
-        children_acc_template = self.search(cr, uid, [('nocreate','!=',True)] + children_acc_criteria, order='id')
+        children_acc_template = self.search(cr, uid, [('nocreate','!=',True)] + children_acc_criteria, order='id', context=context)
         for account_template in self.browse(cr, uid, children_acc_template, context=context):
             # skip the root of COA if it's not the main one
             if (template.account_root_id.id == account_template.id) and template.parent_id:
@@ -2890,7 +2894,7 @@ class account_tax_template(osv.osv):
         'name': fields.char('Tax Name', required=True),
         'sequence': fields.integer('Sequence', required=True, help="The sequence field is used to order the taxes lines from lower sequences to higher ones. The order is important if you have a tax that has several tax children. In this case, the evaluation order is important."),
         'amount': fields.float('Amount', required=True, digits_compute=get_precision_tax(), help="For Tax Type percent enter % ratio between 0-1."),
-        'type': fields.selection( [('percent','Percent'), ('fixed','Fixed'), ('none','None'), ('code','Python Code'), ('balance','Balance')], 'Tax Type', required=True),
+        'type': fields.selection( [('percent','Percent'), ('fixed','Fixed'), ('none','None'), ('code','Python Code'), ('balance','Balance'), ('separate', 'Separate movement')], 'Tax Type', required=True),
         'applicable_type': fields.selection( [('true','True'), ('code','Python Code')], 'Applicable Type', required=True, help="If not applicable (computed through a Python code), the tax won't appear on the invoice."),
         'domain':fields.char('Domain', help="This field is only used if you develop your own module allowing developers to create specific taxes in a custom domain."),
         'account_collected_id':fields.many2one('account.account.template', 'Invoice Tax Account'),
@@ -2901,7 +2905,8 @@ class account_tax_template(osv.osv):
         'python_compute_inv':fields.text('Python Code (reverse)'),
         'python_applicable':fields.text('Applicable Code'),
         'tax_parent_sign': fields.float('Parent Tax Sign', help="Usually 1 or -1."),
-        'tax_credit_payable': fields.selection( [('taxcredit','Tax credit receivable from the taxpayer'), ('taxpay','Tax payable by the taxpayer (or Imports from outside EU)')], 'Who pays tax', required=True, help="If not applicable (computed through a Python code), the tax won't appear on the invoice.Who pays the tax purchaser or seller ( for imports from outside the EU pay the buyer )"),
+        'tax_credit_payable': fields.selection( [('taxcredit','Tax credit receivable from the taxpayer'), ('taxpay','Tax payable by the taxpayer'), ('taxadvpay','Tax payable by the taxpayer when Imports from outside EU'), ('taxbalance', 'Account for balance of taxes')], 'Who pays tax', required=True, help="If not applicable (computed through a Python code), the tax won't appear on the invoice.Who pays the tax purchaser or seller ( for imports from outside the EU pay the buyer )"),
+        'account_separate': fields.boolean(string='Separate movement', default=False),
 
         #
         # Fields used for the Tax declaration

@@ -86,7 +86,6 @@ class purchase_order(osv.osv):
                     ('order_id', '=', po.id), '|', ('date_planned', '=', po.minimum_planned_date), ('date_planned', '<', value)
                 ], context=context)
                 pol_obj.write(cr, uid, pol_ids, {'date_planned': value}, context=context)
-        self.invalidate_cache(cr, uid, context=context)
         return True
 
     def _minimum_planned_date(self, cr, uid, ids, field_name, arg, context=None):
@@ -163,7 +162,7 @@ class purchase_order(osv.osv):
         for purchase in self.browse(cursor, user, ids, context=context):
             res[purchase.id] = all(line.invoiced for line in purchase.order_line if line.state != 'cancel')
         return res
-    
+
     def _get_journal(self, cr, uid, context=None):
         if context is None:
             context = {}
@@ -195,7 +194,7 @@ class purchase_order(osv.osv):
         SELECT picking_id, po.id FROM stock_picking p, stock_move m, purchase_order_line pol, purchase_order po
             WHERE po.id in %s and po.id = pol.order_id and pol.id = m.purchase_line_id and m.picking_id = p.id
             GROUP BY picking_id, po.id
-             
+
         """
         cr.execute(query, (tuple(ids), ))
         picks = cr.fetchall()
@@ -652,7 +651,7 @@ class purchase_order(osv.osv):
             'account_id': account_id,
             'price_unit': order_line.price_unit or 0.0,
             'price_unit_vat': order_line.price_unit_vat or 0.0,
-            'diff_price_vat': order_line.diff_price_vat,
+            #'diff_price_vat': order_line.diff_price_vat,
             'quantity': order_line.product_qty,
             'product_id': order_line.product_id.id or False,
             'uos_id': order_line.product_uom.id or False,
@@ -726,7 +725,7 @@ class purchase_order(osv.osv):
         :rtype: int
         """
         context = dict(context or {})
-        
+
         inv_obj = self.pool.get('account.invoice')
         inv_line_obj = self.pool.get('account.invoice.line')
 
@@ -739,7 +738,7 @@ class purchase_order(osv.osv):
                 #then re-do a browse to read the property fields for the good company.
                 context['force_company'] = order.company_id.id
                 order = self.browse(cr, uid, order.id, context=context)
-            
+
             # generate invoice line correspond to PO line and link that to created invoice (inv_id) and PO line
             inv_lines = []
             for po_line in order.order_line:
@@ -803,7 +802,7 @@ class purchase_order(osv.osv):
         ''' prepare the stock move data from the PO line. This function returns a list of dictionary ready to be used in stock.move's create()'''
         product_uom = self.pool.get('product.uom')
         price_unit = order_line.price_unit
-        price_unit_vat = order_line.price_unit_vat if (order_line.diff_price_vat and order_line.price_unit_vat > order_line.price_unit) else False
+        price_unit_vat = order_line.price_unit_vat if (order_line.price_unit_vat > order_line.price_unit) else False
         if order_line.taxes_id:
             taxes = self.pool['account.tax'].compute_all(cr, uid, order_line.taxes_id, price_unit, 1.0,
                                                              order_line.product_id, order.partner_id, price_unit_vat=price_unit_vat)
@@ -1093,6 +1092,7 @@ class purchase_order(osv.osv):
 class purchase_order_line(osv.osv):
     def _calc_line_base_price(self, cr, uid, line, context=None):
         """Return the base price of the line to be used for tax calculation.
+
         This function can be extended by other modules to modify this base
         price (adding a discount, for example).
         """
@@ -1100,7 +1100,7 @@ class purchase_order_line(osv.osv):
 
     def _calc_line_base_price_vat(self, cr, uid, line, context=None):
         line_price = self._calc_line_base_price(cr, uid, line, context=context)
-        return line.price_unit_vat if (line.diff_price_vat and line.price_unit_vat > line_price) else False
+        return line.price_unit_vat if (line.price_unit_vat > line_price) else False
 
     def _calc_line_quantity(self, cr, uid, line, context=None):
         """Return the base quantity of the line to be used for the subtotal.
@@ -1116,7 +1116,7 @@ class purchase_order_line(osv.osv):
         tax_obj = self.pool.get('account.tax')
         for line in self.browse(cr, uid, ids, context=context):
             line_price = self._calc_line_base_price(cr, uid, line, context=context)
-            line_price_vat = (line.diff_price_vat and line.price_unit_vat > line_price) and line.price_unit_vat or False
+            line_price_vat = (line.price_unit_vat > line_price) and line.price_unit_vat or False
             line_qty = self._calc_line_quantity(cr, uid, line,
                                                 context=context)
             taxes = tax_obj.compute_all(cr, uid, line.taxes_id, line_price,
@@ -1143,7 +1143,7 @@ class purchase_order_line(osv.osv):
         'product_id': fields.many2one('product.product', 'Product', domain=[('purchase_ok','=',True)], change_default=True),
         'move_ids': fields.one2many('stock.move', 'purchase_line_id', 'Reservation', readonly=True, ondelete='set null'),
         'price_unit': fields.float('Unit Price', required=True, digits_compute= dp.get_precision('Product Price')),
-        'price_unit_vat': fields.float('Unit Price for VAT', required=True, digits_compute= dp.get_precision('Product Price')),
+        'price_unit_vat': fields.float('Unit Price for VAT', digits_compute= dp.get_precision('Product Price')),
         'diff_price_vat': fields.boolean('is have VAT price', help="If unchecked, it will allow to work with two price one for sale/purchase and one for VAT calculations."),
         'price_subtotal': fields.function(_amount_line, string='Subtotal', digits_compute= dp.get_precision('Account')),
         'order_id': fields.many2one('purchase.order', 'Order Reference', select=True, required=True, ondelete='cascade'),
@@ -1168,6 +1168,8 @@ class purchase_order_line(osv.osv):
         'product_qty': lambda *a: 1.0,
         'state': lambda *args: 'draft',
         'invoiced': lambda *a: 0,
+        'price_unit': 0.0,
+        'price_unit_vat': 0.0,
     }
     _table = 'purchase_order_line'
     _name = 'purchase.order.line'
@@ -1327,7 +1329,7 @@ class purchase_order_line(osv.osv):
         fpos = fiscal_position_id and account_fiscal_position.browse(cr, uid, fiscal_position_id, context=context) or False
         taxes_ids = account_fiscal_position.map_tax(cr, uid, fpos, taxes, context=context)
         price = self.pool['account.tax']._fix_tax_included_price(cr, uid, price, product.supplier_taxes_id, taxes_ids)
-        res['value'].update({'price_unit': price, 'taxes_id': taxes_ids, 'diff_price_vat': product.diff_price_vat})
+        res['value'].update({'price_unit': price, 'taxes_id': taxes_ids})
 
         return res
 
@@ -1502,7 +1504,7 @@ class procurement_order(osv.osv):
             'product_id': procurement.product_id.id,
             'product_uom': uom_id,
             'price_unit': price or 0.0,
-            'diff_price_vat': product.diff_price_vat,
+            #'diff_price_vat': product.diff_price_vat,
             'date_planned': schedule_date.strftime(DEFAULT_SERVER_DATETIME_FORMAT),
             'taxes_id': [(6, 0, taxes)],
         }

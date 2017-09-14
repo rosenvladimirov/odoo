@@ -146,7 +146,7 @@ class stock_move(osv.osv):
                     if mov_id:
                         mov = self.browse(cr, uid, mov_id[0], context=context)
                         fp = mov.purchase_line_id.order_id.fiscal_position
-                        res = self.pool.get("account.invoice.line").product_id_change(cr, uid, [], move.product_id.id, None, partner_id=move.picking_id.partner_id.id, fposition_id=(fp and fp.id), type='in_invoice', context=context)
+                        res = self.pool.get("account.invoice.line").product_id_change(cr, uid, [], False, move.product_id.id, None, partner_id=move.picking_id.partner_id.id, fposition_id=(fp and fp.id), type='in_invoice', context=context)
                         extra_move_tax[0, move.product_id] = [(6, 0, res['value']['invoice_line_tax_id'])]
         return (is_extra_move, extra_move_tax)
 

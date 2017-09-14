@@ -39,12 +39,12 @@ class TestProductIdChange(TransactionCase):
                                                                         tax_src_id=tax_include_id,
                                                                         tax_dest_id=tax_exclude_id))
 
-        res = self.invoice_line_model.product_id_change(cr, uid, [], product.id, product.uom_id.id,
+        res = self.invoice_line_model.product_id_change(cr, uid, [], pricelist, product.id, product.uom_id.id,
                                                         qty=1, type='out_invoice', partner_id=partner_id,
                                                         fposition_id=fp_id)
         self.assertEquals(100, res['value']['price_unit'], "The included tax must be subtracted to the price")
 
-        res = self.invoice_line_model.product_id_change(cr, uid, [], product.id, product.uom_id.id,
+        res = self.invoice_line_model.product_id_change(cr, uid, [], pricelist, product.id, product.uom_id.id,
                                                         qty=1, type='in_invoice', partner_id=partner_id,
                                                         fposition_id=fp_id)
         self.assertEquals(100, res['value']['price_unit'], "The included tax must be subtracted to the price")

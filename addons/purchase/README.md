@@ -1,3 +1,7 @@
+This module is a fix
+--------------------
+Fixed intracomunatry deals
+
 Odoo Supply Chain
 -----------------
 

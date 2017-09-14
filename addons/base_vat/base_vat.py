@@ -80,10 +80,6 @@ class res_partner(osv.osv):
         vat_country, vat_number = vat[:2].lower(), vat[2:].replace(' ', '')
         return vat_country, vat_number
 
-    def _get_checksum(self, weights, digits):
-        checksum = sum([weight * digit for weight, digit in zip(weights, digits)])
-        return checksum % 11
-
     def simple_vat_check(self, cr, uid, country_code, vat_number, context=None):
         '''
         Check the VAT number depending of the country.
@@ -272,29 +268,19 @@ class res_partner(osv.osv):
             int(vat)
         except ValueError:
             return False
-# 
-#        sum = (3 * int(vat[0])) + (2 * int(vat[1])) + \
-#            (7 * int(vat[2])) + (6 * int(vat[3])) + \
-#            (5 * int(vat[4])) + (4 * int(vat[5])) + \
-#            (3 * int(vat[6])) + (2 * int(vat[7]))
-#
-#        check = 11 -(sum % 11)
-#        if check == 11:
-#            check = 0
-#        if check == 10:
-#            # 10 is not a valid check digit for an organization number
-#            return False
-#        return check == int(vat[8])
 
-        digits = map(int, vat)
-        checksum = 11 - self._get_checksum([3, 2, 7, 6, 5, 4, 3, 2], digits)
-        if checksum == 11:
-            checksum = 0
-        if checksum == 10:
+        sum = (3 * int(vat[0])) + (2 * int(vat[1])) + \
+            (7 * int(vat[2])) + (6 * int(vat[3])) + \
+            (5 * int(vat[4])) + (4 * int(vat[5])) + \
+            (3 * int(vat[6])) + (2 * int(vat[7]))
+
+        check = 11 -(sum % 11)
+        if check == 11:
+            check = 0
+        if check == 10:
             # 10 is not a valid check digit for an organization number
             return False
-        return checksum == int(vat[8])
-
+        return check == int(vat[8])
 
     # Peruvian VAT validation, contributed by Vauxoo
     def check_vat_pe(self, vat):
@@ -372,45 +358,5 @@ class res_partner(osv.osv):
             return int(vat[9]) == c1 and int(vat[10]) == c2
 
         return False
-
-    def check_vat_bg(self, vat):
-        """
-        Check Bulgarian EIK/BULSTAT codes for validity
-        full information about algoritm is available here
-        http://bulstat.registryagency.bg/About.html
-        but nothing not work in Bulgaria creasy administration
-        """ 
-        if not (len(vat) in [9, 10, 13]):
-            return False
-        try:
-            int(vat)
-        except ValueError:
-            return False
-
-        # check vat number (vergi no)
-        if len(vat) == 10:
-            digits = map(int, vat)
-            checksum = self._get_checksum([2, 4, 8, 5, 10, 9, 7, 3, 6], digits)
-            if checksum == 10:
-        	return int(vat[-1]) == 0
-            if checksum < 10:
-        	return int(vat[-1]) == checksum
-
-        if (len(vat) in [9, 13]):
-            digits = map(int, vat)
-            checksum = self._get_checksum(range(1, 9), digits)
-            if checksum == 10:
-               checksum = self._get_checksum(range(3, 11), digits)
-            return int(vat[-1]) == checksum % 10
-
-        if len(vat) == 13:
-            digits = map(int, vat[9:13])
-            checksum = self._get_checksum([2, 7, 3, 5], digits)
-            if checksum == 10:
-                checksum = self._get_checksum([4, 9, 5, 7], digits)
-            return digits[-1] == checksum % 10
-
-#    def _check_lnc_bg(self, vat):
-#    def _check_lnb_bg(self, vat):
 
 # vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

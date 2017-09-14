@@ -20,7 +20,7 @@
 ##############################################################################
 
 {
-    'name': 'Sales Management',
+    'name': 'Sales Management fix',
     'version': '1.0',
     'category': 'Sales Management',
     'sequence': 14,
@@ -69,11 +69,14 @@ The Dashboard for the Sales Manager will include
         'sale_sequence.xml',
         'sale_report.xml',
         'sale_data.xml',
+        'sale_virtual_data.xml',
+        'sale_virtual_view.xml',
         'sale_view.xml',
         'sales_team_view.xml',
         'res_partner_view.xml',
         'report/sale_report_view.xml',
         'report/invoice_report_view.xml',
+        "report/report_receipt.xml",
         'edi/sale_order_action_data.xml',
         'res_config_view.xml',
         'views/report_saleorder.xml',
