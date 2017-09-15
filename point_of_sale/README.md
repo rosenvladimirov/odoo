@@ -7,6 +7,7 @@ and taxes.
 4. Full managment for old PO.
 5. Work with prices with included taxes (B2C).
 Pathway:
+--------
 1. Add support for partical invoiceng.
 2. Trash and restore PO from trash.
 3. Some security things.
