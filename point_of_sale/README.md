@@ -1,3 +1,19 @@
+Fixed original module
+---------------------
+1. Add engine for pricelist (best solution to work with margin clasificator) 
+and taxes.
+2. Refund on front.
+3. Manage partical payments, advances and loan.
+4. Full managment for old PO.
+5. Work with prices with included taxes (B2C).
+Pathway:
+1. Add support for partical invoiceng.
+2. Trash and restore PO from trash.
+3. Some security things.
+This module work only with my patches for other original modules.
+After replacement it need to upgrade base module and everiting be fine.
+All fixed is compatible with other odoo-modules and some OCA-modules.
+
 Odoo Point of Sale
 -----------------------------
 
