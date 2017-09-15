@@ -6,6 +6,7 @@ and taxes.
 3. Manage partical payments, advances and loan.
 4. Full managment for old PO.
 5. Work with prices with included taxes (B2C).
+
 Pathway:
 --------
 1. Add support for partical invoiceng.
