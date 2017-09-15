@@ -1000,30 +1000,7 @@ function openerp_pos_screens(instance, module){ //module is instance.point_of_sa
                 self.on_click_next_order();
             });
             this.$el.find('.button.validate').click(function(){
-                var orderModel = new instance.web.Model('pos.order');
-                if(!self.current_order_id){
-                    self.pos_widget.screen_messages.errors('not-select-order');
-                }
-                return orderModel.call('unlink', [[self.current_order_id]])
-                .then(function (result) {
-                    var ss = self.pos.pos_widget.screen_selector;
-                    ss.set_current_screen('products');
-                }).fail(function (error, event){
-                    if (parseInt(error.code) === 200) {
-                        // Business Logic Error, not a connection problem
-                        self.pos_widget.screen_messages.errors({type: 'error-traceback', 
-                                                     content: {
-                                                        message: error.data.message,
-                                                        comment: error.data.debug
-                                                        },
-                                                    });
-
-                    }
-                    else{
-                        self.pos_widget.screen_messages.errors('connection-offline');
-                    }
-                    event.preventDefault();
-                });
+                self.on_click_validate_order();
             });
             this.$el.find('.button.validate').hide();
 
@@ -1226,6 +1203,48 @@ function openerp_pos_screens(instance, module){ //module is instance.point_of_sa
             this.pos_widget.screen_selector.set_current_screen('receipt');
             this.pos_widget.screen_selector.screen_set['receipt'] = receiptScreen;
         },
+        invoice_button: function() {
+            var self = this;
+            if( this.pos.config.iface_invoicing ){
+                this.add_action_button({
+                        label: _t('Invoice'),
+                        name: 'invoice',
+                        icon: '/point_of_sale/static/src/img/icons/png48/invoice.png',
+                        click: function(){
+                            self.validate_order({invoice: true});
+                        },
+                    });
+            }
+        },
+        on_click_validate_order: function(){
+            var self = this;
+            var order = this.pos.get('selectedOrder');
+            var order_id = order.get_order_id();
+            var orderModel = new instance.web.Model('pos.order');
+            if(order_id === undefined){
+                self.pos_widget.screen_messages.errors('not-select-order');
+                return;
+            }
+            return orderModel.call('unlink', [[order_id]])
+            .then(function (result) {
+                order.set_order_state('new');
+                var ss = self.pos.pos_widget.screen_selector;
+                ss.set_current_screen('products');
+            }).fail(function (error, event){
+                if (parseInt(error.code) === 200) {
+                    // Business Logic Error, not a connection problem
+                    self.pos_widget.screen_messages.errors({type: 'error-traceback', 
+                                                 content: {
+                                                    message: error.data.message,
+                                                    comment: error.data.debug
+                                                    },
+                                                });
+                }else{
+                    self.pos_widget.screen_messages.errors('connection-offline');
+                }
+                event.preventDefault();
+            });
+        },
         on_click_merge_order: function(event){
             var order = this.pos.get('selectedOrder');
             var order_ids = [];
@@ -1247,7 +1266,6 @@ function openerp_pos_screens(instance, module){ //module is instance.point_of_sa
                 }
             }
         },
-
         on_click_draft_order: function(event){
             this.$el.find('.button.validate').hide();
             this.$el.find('.button.next').hide();
@@ -1289,16 +1307,14 @@ function openerp_pos_screens(instance, module){ //module is instance.point_of_sa
             if(this.pos.config.product_id === false){
                 return;
             }
-            var product = this.pos.db.get_product_by_id(this.pos.config.product_id[0]);
             var order = this.pos.get('selectedOrder');
             var order_id = order.get_order_id();
-            var total = order.getDueLeft();
             if(order_id) {
+                var product = this.pos.db.get_product_by_id(this.pos.config.product_id[0]);
+                var total = this.pos.taxes_engine.get_all_prices({quantity: 1, unit_price: order.getDueLeft(), disc: 0, force_tax_included: true, product: product,}).priceWithoutTax;
                 order.set_order_state('pay');
                 order.get('orderLines').reset();
-                order.addProduct(product,
-                                 this.prepare_orderline_options({qty: 1, price_unit: total, type: '', discount: 0,}, 
-                                                                {merge: false, mode: 'pay'}, order_id));
+                order.addProduct(product, this.prepare_orderline_options({qty: 1, price_unit: total, type: '', discount: 0,}, {merge: false, mode: 'pay'}, order_id));
                 this.$el.find('.button.next').show();
             }
         },

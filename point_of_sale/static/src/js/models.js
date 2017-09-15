@@ -1336,23 +1336,26 @@ function openerp_pos_models(instance, module){ //module is instance.point_of_sal
             var moneyinout = this.getMoneyInOut();
             var paymentLines = this.get('paymentLines');
             var newPaymentline = new module.Paymentline({},{cashregister:cashregister, pos:this.pos});
-            var inx = _.find(paymentLines.models, function(x) { return ['advance','cash'].indexOf(x.type) !== -1;});
+            //var inx = _.find(paymentLines.models, function(x) { return ['advance','cash'].indexOf(x.type) !== -1;});
             // search for advance or moneyin/out line
-            if(paymentAdvance !== 0){
+            if(paymentAdvance > 0){
                 newPaymentline.set_amount( Math.max(paymentAdvance,0) );
             }
             if(cashregister.journal.type !== 'cash'){
                 newPaymentline.set_amount( Math.max(this.getDueLeft(),0) );
             }
-            newPaymentline.set_money_type(paymentAdvance !== 0 && 'advance' || newPaymentline.get_money_type());
+            newPaymentline.set_money_type(paymentAdvance > 0 && 'advance' || newPaymentline.get_money_type());
             newPaymentline.set_money_type(moneyinout !== 0 && 'cash' || newPaymentline.get_money_type());
-            console.log("add Payments", inx, _, paymentLines);
+            //console.log("add Payments", inx, _, paymentLines);
             //if(inx){
             //    paymentLines[inx] = newPaymentline;
             //} else {
-                paymentLines.add(newPaymentline);
+            paymentLines.add(newPaymentline);
             //}
             this.selectPaymentline(newPaymentline);
+            if (this.get_order_state() === 'standart') {
+                this.set_order_state('renew')
+            }
             console.log("Add payment line", paymentAdvance);
         },
         removePaymentline: function(line){

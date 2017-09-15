@@ -717,10 +717,9 @@ class pos_order(osv.osv):
         for order_tmp in orders:
             _logger.debug("Advance line %s" % order_tmp)
             # payment allwise make invoice
-            order_id = order_tmp.get('order_id', False)
+            order_id = order_tmp['data'].get('order_id', False)
             if order_id:
-                order_id = order_tmp['order_id']
-                order = self._order_fields(cr, uid, order_tmp, context=context)
+                order = self._order_fields(cr, uid, order_tmp['data'], context=context)
                 curr = pl_obj.browse(cr, uid, order['pricelist_id'], context=context)
                 part = part_obj.browse(cr, uid, order['partner_id'], context=context)
                 lines = []
@@ -733,7 +732,7 @@ class pos_order(osv.osv):
                     'reference': order['name'],
                     'partner_id': order['partner_id'],
                     'pricelist_id': order['pricelist_id'],
-                    'fiscal_position': order_tmp['fiscal_position'],
+                    'fiscal_position': order_tmp['data']['fiscal_position'],
                     'currency_id': curr.currency_id.id, # considering partner's sale pricelist's currency
                 }
                 for line in order['lines']:
@@ -747,6 +746,7 @@ class pos_order(osv.osv):
                         'invoice_line_tax_id': line[2]['tax_ids'],
                     }
                     lines.append(inv_line)
+                _logger.debug("Get payments %s:%s:%s:%s:%s" % (inv, lines, order, curr, part))
                 inv_id = self._make_invoice(cr, uid, inv, lines, context)
                 ## self.write(cr, uid, [order_id], {'invoice_id': inv_id, 'state': 'invoiced'}, context=context)
                 # multi invoice version
@@ -756,7 +756,7 @@ class pos_order(osv.osv):
                 #order_obj = self.browse(cr, uid, order_id, context)
                 #self.pool['account.invoice'].signal_workflow(cr, uid, [order_obj.invoice_id.id], 'invoice_open')
                 journal_ids = set()
-                for payments in order_tmp['statement_ids']:
+                for payments in order_tmp['data']['statement_ids']:
                     self.add_payment(cr, uid, order_id, self._payment_fields(cr, uid, payments[2], context=context), context=context)
                     journal_ids.add(payments[2]['journal_id'])
                 order_ids.append(order_id)
@@ -779,7 +779,8 @@ class pos_order(osv.osv):
                 _logger.error('Could not fully process the POS Order: %s', tools.ustr(e))
 
             if pay_orders:
-                order_id = self._process_pay_order(cr, uid, [pay_orders], context=context)
+                pay_order = dict(to_invoice=True, data=pay_orders)
+                order_id = self._process_pay_order(cr, uid, [pay_order], context=context)
                 order_ids += order_id
 
             if to_invoice:
@@ -796,7 +797,7 @@ class pos_order(osv.osv):
 
         _logger.debug("Get order %s" % (order))
 
-        new_order = True
+        new_order = False
         pay_order = False
         order_id = order.get('order_id', False)
         #first check for advance payment
@@ -817,24 +818,19 @@ class pos_order(osv.osv):
 
         fields = self._order_fields(cr, uid, order, context=context)
         _logger.debug("Get order fields %s=>%s" % (order_id, fields))
-        if order_id:
+        if not order_id:
             # write
-            order_ids = self.search(cr, uid, [('id', '=', order_id)], context=context)
-            if order_ids:
-                self.write(cr, uid, order_ids, fields, context=context)
-                order_id = order_ids
-                new_order = False
-            else:
-                order_id = self.create(cr, uid, fields, context=context)
-        else:
+            #self.write(cr, uid, order_id, fields, context=context)
+            new_order = True
             # create Order
             order_id = self.create(cr, uid, fields, context=context)
 
         journal_ids = set()
-        _logger.info("Process order %s:%s->%s=>%s" % (order_id,self.browse(cr,uid,[order_id],context=context),order,order['statement_ids']))
+        #_logger.info("Process order %s:%s->%s=>%s" % (order_id,self.browse(cr,uid,[order_id],context=context),order,order['statement_ids']))
         for payments in order['statement_ids']:
-            self.add_payment(cr, uid, order_id, self._payment_fields(cr, uid, payments[2], context=context), context=context)
-            journal_ids.add(payments[2]['journal_id'])
+            if payments:
+                self.add_payment(cr, uid, order_id, self._payment_fields(cr, uid, payments[2], context=context), context=context)
+                journal_ids.add(payments[2]['journal_id'])
 
         if session.sequence_number <= order['sequence_number'] and new_order:
             session.write({'sequence_number': order['sequence_number'] + 1})
@@ -880,10 +876,11 @@ class pos_order(osv.osv):
         existing_orders = self.read(cr, uid, existing_order_ids, ['pos_reference'], context=context)
         existing_references = set([o['pos_reference'] for o in existing_orders])
         existing_ids = set([o['id'] for o in existing_orders])
-        _logger.info("Existing orders %s:%s:%s=>%s" % (existing_orders, existing_ids, existing_references, orders))
+
         orders_to_save = orders = [o for o in orders if o['data']['name'] not in existing_references or o['data'].get('order_id', False) in existing_ids]
         #orders_to_replace = orders = [o for o in orders if o['data']['name'] in existing_references]
         #_logger.debug("JSON order %s" % orders_to_save)
+        _logger.info("Existing orders %s==>%s:%s:%s=>%s" % (orders_to_save,existing_orders, existing_ids, existing_references, orders))
 
         order_ids = []
         draft_orders = []
@@ -925,12 +922,12 @@ class pos_order(osv.osv):
             order_id = self._process_base_order(cr, uid, orders_to_save, context=context)
             order_ids += order_id
 
-        # chech rest and send paid signal
+        # checк rest and send paid signal
         for tmp_order in self.browse(cr, uid, order_ids, context=context):
             if float_is_zero(tmp_order.amount_total - tmp_order.amount_paid, self.pool.get('decimal.precision').precision_get(cr, uid, 'Account')):
                 _logger.debug("Paid %s" % tmp_order)
                 if tmp_order.invoice_ids:
-                    self.signal_workflow(cr, uid, [order.id], 'invoice')
+                    self.signal_workflow(cr, uid, [tmp_order.id], 'invoice')
                 try:
                     self.signal_workflow(cr, uid, [tmp_order.id], 'paid')
                 except psycopg2.OperationalError:
@@ -963,10 +960,11 @@ class pos_order(osv.osv):
             if rec.state not in ('draft','cancel'):
                 raise osv.except_osv(_('Unable to Delete!'), _('In order to delete a sale, it must be new or cancelled.'))
             else:
-                cr.execute('delete from pos_order_invoice_rel where order_id = %s', (rec.id))
+                cr.execute('delete from pos_order_invoice_rel where order_id = %s', [rec.id])
                 self.invalidate_cache(cr, uid, ['invoice_ids'], [rec.id], context=context)
-                cr.execute('delete from picking_ids where order_id = %s', (rec.id))
-                self.invalidate_cache(cr, uid, ['picking_ids'], [rec.id], context=context)
+                #self.pool.get('stock.picking').unlink(cr, uid, rec.picking_ids, context=context)
+                #cr.execute('delete from picking_ids where order_id = %s', [rec.id])
+                #self.invalidate_cache(cr, uid, ['picking_ids'], [rec.id], context=context)
         return super(pos_order, self).unlink(cr, uid, ids, context=context)
 
     def onchange_partner_id(self, cr, uid, ids, part=False, context=None):
@@ -1269,9 +1267,10 @@ class pos_order(osv.osv):
         ol_obj = self.pool.get('pos.order.line')
         order = self.browse(cr, uid, order_id, context=context)
         _logger.debug("Load order from frontend %s:%s:%s:%s" % (order_id, order, order.lines, order.invoice_ids))
-        invoice = self.pool.get('account.invoice').browse(cr, uid, [i.id for i in order.invoice_ids], context=context)
+        invoices = self.pool.get('account.invoice').browse(cr, uid, [i.id for i in order.invoice_ids], context=context)
         # read lines in original order
-        for l in ol_obj.browse(cr, uid, [l.id for l in order.lines], context=context):
+        order_lines_ids = [l.id for l in order.lines]
+        for l in ol_obj.browse(cr, uid, order_lines_ids, context=context):
             orderlines.append(dict(
                                     id=l.id,
                                     order_id=order.id,
@@ -1282,9 +1281,11 @@ class pos_order(osv.osv):
                                     discount=l.discount,
                                 ))
         # check advance payments and read lines
-        for l in self.pool.get('account.invoice.line').browse(cr, uid, [l.id for l in invoice.invoice_line], context=context):
-            if l.product_id.product_tmpl_id.type == 'money':
-                orderlines.append(dict(
+        for invoice in invoices:
+            inv_lines_ids = [l.id for l in invoice.invoice_line]
+            for l in self.pool.get('account.invoice.line').browse(cr, uid, inv_lines_ids, context=context):
+                if l.product_id.product_tmpl_id.type == 'money':
+                    orderlines.append(dict(
                                         id=False,
                                         order_id=order.id,
                                         product_id=(l.product_id.id, "%s [%s]" % (l.product_id.name,_('invoice')+': '+invoice.internal_number)),
